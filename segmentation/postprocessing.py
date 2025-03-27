@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-后处理模块，提供形态学操作、连通区域分析、边界平滑等功能
+增强版后处理模块，提供更强大的形态学操作、连通区域分析和边界平滑功能
 """
 
 import cv2
@@ -23,8 +23,8 @@ def apply_morphology(mask, operations=None):
     if operations is None:
         operations = {
             'opening': {'enabled': True, 'kernel_size': 3, 'iterations': 1},
-            'closing': {'enabled': True, 'kernel_size': 3, 'iterations': 2},
-            'dilation': {'enabled': True, 'kernel_size': 3, 'iterations': 1},
+            'closing': {'enabled': True, 'kernel_size': 5, 'iterations': 2},
+            'dilation': {'enabled': True, 'kernel_size': 5, 'iterations': 2},
             'erosion': {'enabled': False, 'kernel_size': 3, 'iterations': 1}
         }
     
@@ -39,15 +39,15 @@ def apply_morphology(mask, operations=None):
     
     # 形态学闭操作（填补小孔洞）
     if operations.get('closing', {}).get('enabled', False):
-        kernel_size = operations.get('closing', {}).get('kernel_size', 3)
+        kernel_size = operations.get('closing', {}).get('kernel_size', 5)
         iterations = operations.get('closing', {}).get('iterations', 2)
         kernel = np.ones((kernel_size, kernel_size), np.uint8)
         result = cv2.morphologyEx(result, cv2.MORPH_CLOSE, kernel, iterations=iterations)
     
     # 膨胀（扩展前景区域）
     if operations.get('dilation', {}).get('enabled', False):
-        kernel_size = operations.get('dilation', {}).get('kernel_size', 3)
-        iterations = operations.get('dilation', {}).get('iterations', 1)
+        kernel_size = operations.get('dilation', {}).get('kernel_size', 5)
+        iterations = operations.get('dilation', {}).get('iterations', 2)
         kernel = np.ones((kernel_size, kernel_size), np.uint8)
         result = cv2.dilate(result, kernel, iterations=iterations)
     
@@ -61,9 +61,9 @@ def apply_morphology(mask, operations=None):
     return result
 
 
-def analyze_connected_components(mask, min_area_ratio=0.01, max_num_components=3):
+def analyze_connected_components(mask, min_area_ratio=0.005, max_num_components=3):
     """
-    连通区域分析，去除小区域，保留最大的几个连通区域
+    连通区域分析，增强版本能够更好地处理分离的区域
     
     参数:
         mask: 输入掩码
@@ -83,50 +83,37 @@ def analyze_connected_components(mask, min_area_ratio=0.01, max_num_components=3
     # 创建输出掩码
     result = np.zeros_like(mask)
     
+    # 如果只有背景区域或没有足够大的区域
+    if num_labels <= 1 or np.max([stats[i, cv2.CC_STAT_AREA] for i in range(1, num_labels)]) < min_area:
+        # 返回原始掩码，不进行过滤
+        return mask
+    
     # 按面积降序排序连通区域
     areas = [(i, stats[i, cv2.CC_STAT_AREA]) for i in range(1, num_labels)]  # 跳过背景 (label 0)
     areas.sort(key=lambda x: x[1], reverse=True)
     
-    # 保留最大的几个连通区域
+    # 保留足够大的连通区域（最多max_num_components个）
+    regions_to_keep = []
     for i, (label, area) in enumerate(areas):
-        if i >= max_num_components or area < min_area:
+        if i >= max_num_components:
             break
-        
-        # 将该连通区域添加到结果中
+        if area >= min_area:
+            regions_to_keep.append(label)
+    
+    # 如果没有足够大的区域，至少保留最大的一个
+    if not regions_to_keep and areas:
+        regions_to_keep.append(areas[0][0])
+    
+    # 填充结果掩码
+    for label in regions_to_keep:
         result[labels == label] = 255
     
     return result
 
 
-def smooth_contours(mask, method='gaussian', kernel_size=5):
+def improved_fill_holes(mask, min_hole_area=10):
     """
-    平滑分割边界
-    
-    参数:
-        mask: 输入掩码
-        method: 平滑方法，可选 'gaussian', 'median'
-        kernel_size: 核大小
-        
-    返回:
-        平滑后的掩码
-    """
-    # 应用平滑处理
-    if method == 'gaussian':
-        smoothed = cv2.GaussianBlur(mask, (kernel_size, kernel_size), 0)
-    elif method == 'median':
-        smoothed = cv2.medianBlur(mask, kernel_size)
-    else:
-        smoothed = mask.copy()
-    
-    # 再次二值化，确保结果仍是二值图像
-    _, smoothed = cv2.threshold(smoothed, 127, 255, cv2.THRESH_BINARY)
-    
-    return smoothed
-
-
-def fill_holes(mask, min_hole_area=50):
-    """
-    填充掩码中的孔洞
+    改进的孔洞填充算法，更好地处理复杂形状
     
     参数:
         mask: 输入掩码
@@ -135,29 +122,191 @@ def fill_holes(mask, min_hole_area=50):
     返回:
         填充孔洞后的掩码
     """
+    # 确保输入掩码是二值图像
+    _, binary_mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+    
     # 复制输入掩码
-    filled = mask.copy()
+    filled = binary_mask.copy()
     
-    # 找到轮廓
-    contours, hierarchy = cv2.findContours(filled, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+    # 方法1：使用形态学闭操作填充小孔洞
+    kernel = np.ones((5, 5), np.uint8)
+    morph_filled = cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel, iterations=3)
     
-    # 遍历轮廓
-    for i, contour in enumerate(contours):
-        # 如果是孔洞（内部轮廓）
-        if hierarchy[0][i][3] >= 0:  # 有父轮廓
-            # 计算孔洞面积
-            area = cv2.contourArea(contour)
+    # 方法2：使用洪水填充法处理较大的孔洞
+    # 创建一个略大的图像，确保边界区域连通
+    h, w = binary_mask.shape
+    padded = np.zeros((h+2, w+2), np.uint8)
+    padded[1:-1, 1:-1] = binary_mask
+    
+    # 用于洪水填充的掩码
+    flood_mask = np.zeros((h+4, w+4), np.uint8)
+    
+    # 从边界开始洪水填充
+    cv2.floodFill(padded, flood_mask, (0, 0), 255)
+    
+    # 取反，获取内部区域
+    padded = cv2.bitwise_not(padded)
+    
+    # 裁剪回原始大小
+    flood_filled = padded[1:-1, 1:-1]
+    
+    # 与原始掩码合并
+    combined = cv2.bitwise_or(binary_mask, flood_filled)
+    
+    # 方法3：使用轮廓分析填充孔洞
+    contours, hierarchy = cv2.findContours(
+        binary_mask, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE
+    )
+    
+    contour_filled = binary_mask.copy()
+    
+    if contours and hierarchy is not None:
+        for i, contour in enumerate(contours):
+            # 仅填充内部轮廓（孔洞）
+            if hierarchy[0][i][3] >= 0:  # 有父轮廓表示是孔洞
+                area = cv2.contourArea(contour)
+                if area >= min_hole_area:
+                    cv2.drawContours(contour_filled, [contour], 0, 255, -1)
+    
+    # 组合所有方法的结果
+    final_filled = cv2.bitwise_or(combined, contour_filled)
+    
+    # 应用一次中值滤波平滑结果
+    final_filled = cv2.medianBlur(final_filled, 5)
+    
+    return final_filled
+
+
+def improved_smooth_contours(mask, method='gaussian', kernel_size=7):
+    """
+    改进的边界平滑算法
+    
+    参数:
+        mask: 输入掩码
+        method: 平滑方法，可选 'gaussian', 'median', 'combined'
+        kernel_size: 核大小
+        
+    返回:
+        平滑后的掩码
+    """
+    # 确保输入掩码是二值图像
+    _, binary_mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+    
+    if method == 'combined':
+        # 结合高斯和中值滤波的效果
+        # 先应用高斯滤波
+        gaussian_smoothed = cv2.GaussianBlur(binary_mask, (kernel_size, kernel_size), 0)
+        _, gaussian_smoothed = cv2.threshold(gaussian_smoothed, 127, 255, cv2.THRESH_BINARY)
+        
+        # 再应用中值滤波
+        median_smoothed = cv2.medianBlur(gaussian_smoothed, kernel_size)
+        
+        # 最后再次二值化
+        _, smoothed = cv2.threshold(median_smoothed, 127, 255, cv2.THRESH_BINARY)
+        
+    elif method == 'contour':
+        # 使用轮廓重绘的方式平滑
+        contours, _ = cv2.findContours(binary_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        # 创建空白画布
+        smoothed = np.zeros_like(binary_mask)
+        
+        # 对每个轮廓应用平滑
+        for contour in contours:
+            # 对轮廓点进行平滑处理
+            epsilon = 0.005 * cv2.arcLength(contour, True)
+            approx = cv2.approxPolyDP(contour, epsilon, True)
             
-            # 如果面积大于阈值，填充该孔洞
-            if area > min_hole_area:
-                cv2.drawContours(filled, [contour], 0, 255, -1)
+            # 绘制平滑后的轮廓并填充
+            cv2.drawContours(smoothed, [approx], 0, 255, -1)
+        
+    elif method == 'gaussian':
+        # 应用高斯滤波
+        smoothed = cv2.GaussianBlur(binary_mask, (kernel_size, kernel_size), 0)
+        _, smoothed = cv2.threshold(smoothed, 127, 255, cv2.THRESH_BINARY)
+        
+    elif method == 'median':
+        # 应用中值滤波
+        smoothed = cv2.medianBlur(binary_mask, kernel_size)
+        
+    else:
+        # 默认不做处理
+        smoothed = binary_mask.copy()
     
-    return filled
+    return smoothed
+
+
+def merge_segmentation_masks(masks, weights=None):
+    """
+    智能合并多个分割掩码，可以指定不同掩码的权重
+    
+    参数:
+        masks: 掩码字典或列表
+        weights: 权重字典，与masks的键对应
+        
+    返回:
+        合并后的掩码
+    """
+    if not masks:
+        return None
+    
+    # 如果是字典，获取掩码列表和对应权重
+    if isinstance(masks, dict):
+        if weights is None:
+            # 默认权重
+            weights = {
+                'color': 1.0,     # 颜色分割权重高
+                'threshold': 0.7,
+                'edge': 0.3,
+                'region': 0.5,
+                'yellow': 1.2     # 黄色检测权重最高
+            }
+        
+        # 根据可用的掩码进行调整
+        available_weights = {}
+        for key in masks:
+            if key in weights:
+                available_weights[key] = weights[key]
+            else:
+                available_weights[key] = 0.5  # 默认权重
+        
+        # 创建加权掩码
+        h, w = next(iter(masks.values())).shape
+        weighted_sum = np.zeros((h, w), dtype=np.float32)
+        total_weight = 0
+        
+        for key, mask in masks.items():
+            if key in available_weights:
+                weight = available_weights[key]
+                weighted_sum += (mask / 255.0) * weight
+                total_weight += weight
+        
+        # 归一化并二值化
+        if total_weight > 0:
+            normalized = weighted_sum / total_weight
+            merged = (normalized > 0.5).astype(np.uint8) * 255
+        else:
+            # 如果没有有效权重，使用简单的逻辑或
+            merged = np.zeros((h, w), dtype=np.uint8)
+            for mask in masks.values():
+                merged = cv2.bitwise_or(merged, mask)
+    
+    else:  # 如果是列表
+        if not masks:
+            return None
+        
+        # 使用简单的逻辑或
+        merged = np.zeros_like(masks[0], dtype=np.uint8)
+        for mask in masks:
+            if mask is not None:
+                merged = cv2.bitwise_or(merged, mask)
+    
+    return merged
 
 
 def postprocess_mask(masks, features, config=None):
     """
-    对分割掩码进行后处理
+    对分割掩码进行增强后处理
     
     参数:
         masks: 分割方法生成的掩码集合
@@ -172,58 +321,71 @@ def postprocess_mask(masks, features, config=None):
             'morphology': {
                 'enabled': True,
                 'opening': {'enabled': True, 'kernel_size': 3, 'iterations': 1},
-                'closing': {'enabled': True, 'kernel_size': 3, 'iterations': 2},
-                'dilation': {'enabled': True, 'kernel_size': 3, 'iterations': 1},
+                'closing': {'enabled': True, 'kernel_size': 7, 'iterations': 3},
+                'dilation': {'enabled': True, 'kernel_size': 5, 'iterations': 2},
                 'erosion': {'enabled': False, 'kernel_size': 3, 'iterations': 1}
             },
             'connected_components': {
                 'enabled': True,
-                'min_area_ratio': 0.01,
+                'min_area_ratio': 0.005,
                 'max_num_components': 3
             },
             'contour_smoothing': {
                 'enabled': True,
-                'method': 'gaussian',
-                'kernel_size': 5
+                'method': 'combined',  # 使用组合平滑方法
+                'kernel_size': 7
             },
             'hole_filling': {
                 'enabled': True,
-                'min_hole_area': 50
+                'min_hole_area': 10
             }
         }
     
-    # 获取最终掩码
-    if 'final' in masks:
-        result = masks['final']
-    else:
-        # 如果没有最终掩码，使用颜色掩码
-        result = masks.get('color', np.zeros_like(next(iter(masks.values()))))
+    # 检查掩码是否可用
+    if not masks:
+        return None
+    
+    # 尝试在掩码中查找颜色专门识别的黄色花朵掩码
+    yellow_mask = masks.get('yellow', None)
+    
+    # 智能合并所有掩码创建初始掩码
+    initial_mask = merge_segmentation_masks(masks)
+    
+    if initial_mask is None:
+        return None
+    
+    # 保存中间结果
+    result = initial_mask.copy()
     
     # 形态学操作
     if config.get('morphology', {}).get('enabled', False):
         result = apply_morphology(result, config.get('morphology'))
     
+    # 填充孔洞 - 使用改进版本
+    if config.get('hole_filling', {}).get('enabled', False):
+        result = improved_fill_holes(
+            result,
+            min_hole_area=config.get('hole_filling', {}).get('min_hole_area', 10)
+        )
+    
     # 连通区域分析
     if config.get('connected_components', {}).get('enabled', False):
         result = analyze_connected_components(
             result,
-            min_area_ratio=config.get('connected_components', {}).get('min_area_ratio', 0.01),
+            min_area_ratio=config.get('connected_components', {}).get('min_area_ratio', 0.005),
             max_num_components=config.get('connected_components', {}).get('max_num_components', 3)
         )
     
-    # 填充孔洞
-    if config.get('hole_filling', {}).get('enabled', False):
-        result = fill_holes(
+    # 边界平滑 - 使用改进版本
+    if config.get('contour_smoothing', {}).get('enabled', False):
+        result = improved_smooth_contours(
             result,
-            min_hole_area=config.get('hole_filling', {}).get('min_hole_area', 50)
+            method=config.get('contour_smoothing', {}).get('method', 'combined'),
+            kernel_size=config.get('contour_smoothing', {}).get('kernel_size', 7)
         )
     
-    # 边界平滑
-    if config.get('contour_smoothing', {}).get('enabled', False):
-        result = smooth_contours(
-            result,
-            method=config.get('contour_smoothing', {}).get('method', 'gaussian'),
-            kernel_size=config.get('contour_smoothing', {}).get('kernel_size', 5)
-        )
+    # 最后一次形态学闭操作，确保结果平滑
+    kernel = np.ones((5, 5), np.uint8)
+    result = cv2.morphologyEx(result, cv2.MORPH_CLOSE, kernel, iterations=2)
     
     return result

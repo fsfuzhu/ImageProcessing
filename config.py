@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-配置文件，包含所有可调整的参数
+配置文件，包含所有可调整的参数 - 针对黄色花朵优化
 """
 
 class Config:
@@ -22,28 +22,28 @@ class Config:
             # 去噪
             'denoise': {
                 'enabled': True,
-                'method': 'gaussian',  # 'gaussian', 'median', 'bilateral'
+                'method': 'bilateral',  # 'gaussian', 'median', 'bilateral'
                 'kernel_size': 5,
-                'sigma': 1.0
+                'sigma': 1.5
             },
             # 对比度增强
             'contrast': {
                 'enabled': True,
                 'method': 'clahe',  # 'clahe', 'histogram_equalization'
-                'clip_limit': 2.0,
+                'clip_limit': 3.0,
                 'tile_grid_size': (8, 8)
             },
             # 图像锐化
             'sharpen': {
-                'enabled': False,
+                'enabled': True,
                 'kernel_size': 3,
                 'sigma': 1.0,
-                'amount': 1.5,
-                'threshold': 0
+                'amount': 1.8,
+                'threshold': 5
             }
         }
         
-        # 颜色空间转换参数
+        # 颜色空间转换参数 - 针对黄色花朵优化
         self.color_space = {
             'space': 'hsv',  # 'rgb', 'hsv', 'lab', 'ycrcb'
             'channels': [0, 1, 2]  # 用于分割的通道索引
@@ -54,32 +54,32 @@ class Config:
             # 阈值分割
             'threshold': {
                 'enabled': True,
-                'method': 'adaptive',  # 'global', 'otsu', 'adaptive'
+                'method': 'otsu',  # 'global', 'otsu', 'adaptive'
                 'block_size': 11,
                 'constant': 2,
                 'max_value': 255
             },
-            # 颜色分割
+            # 颜色分割 - 优化对黄色的识别
             'color': {
                 'enabled': True,
                 'method': 'kmeans',  # 'kmeans', 'watershed', 'grabcut'
-                'n_clusters': 5,
-                'attempts': 10,
-                'max_iterations': 100
+                'n_clusters': 4,  # 减少聚类数提高对主要黄色区域的识别
+                'attempts': 15,  # 增加尝试次数提高稳定性
+                'max_iterations': 150  # 增加迭代次数
             },
             # 边缘检测
             'edge': {
                 'enabled': True,
                 'method': 'canny',  # 'canny', 'sobel', 'laplacian'
-                'threshold1': 50,
-                'threshold2': 150,
+                'threshold1': 30,  # 降低阈值捕获更多边缘
+                'threshold2': 120,
                 'aperture_size': 3
             },
             # 区域生长
             'region': {
-                'enabled': False,
+                'enabled': True,  # 启用区域生长
                 'seed_selection': 'auto',  # 'auto', 'center'
-                'threshold': 10,
+                'threshold': 15,  # 增加阈值以包含更多相似颜色
                 'connectivity': 8
             }
         }
@@ -96,13 +96,13 @@ class Config:
                 },
                 'closing': {
                     'enabled': True,
-                    'kernel_size': 3,
-                    'iterations': 2
+                    'kernel_size': 7,  # 增大核大小填补更多空隙
+                    'iterations': 3    # 增加迭代次数
                 },
                 'dilation': {
                     'enabled': True,
-                    'kernel_size': 3,
-                    'iterations': 1
+                    'kernel_size': 5,  # 增大核大小
+                    'iterations': 2    # 增加迭代次数
                 },
                 'erosion': {
                     'enabled': False,
@@ -113,18 +113,18 @@ class Config:
             # 连通区域分析
             'connected_components': {
                 'enabled': True,
-                'min_area_ratio': 0.01,  # 相对于图像大小的最小连通区域比例
-                'max_num_components': 3  # 保留的最大连通区域数量
+                'min_area_ratio': 0.005,  # 减小该值以保留更小的区域
+                'max_num_components': 3   # 限制最大连通区域数量
             },
             # 边界平滑
             'contour_smoothing': {
                 'enabled': True,
                 'method': 'gaussian',  # 'gaussian', 'median'
-                'kernel_size': 5
+                'kernel_size': 7  # 增大平滑核
             },
             # 孔洞填充
             'hole_filling': {
                 'enabled': True,
-                'min_hole_area': 50  # 填充的最小孔洞面积
+                'min_hole_area': 10  # 减小该值填充更小的空洞
             }
         }

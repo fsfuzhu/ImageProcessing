@@ -61,11 +61,11 @@ def threshold_segmentation(image, method='adaptive', block_size=11, constant=2, 
 
 def color_based_segmentation(image, method='kmeans', n_clusters=5, attempts=10, max_iterations=100):
     """
-    基于颜色的分割
+    基于颜色的分割，特别优化对黄色花朵的识别
     
     参数:
         image: 输入图像(BGR)
-        method: 分割方法，可选 'kmeans', 'watershed', 'grabcut'
+        method: 分割方法，可选 'kmeans', 'watershed', 'grabcut', 'yellow_detect'
         n_clusters: K-means聚类数
         attempts: K-means尝试次数
         max_iterations: K-means最大迭代次数
@@ -73,6 +73,9 @@ def color_based_segmentation(image, method='kmeans', n_clusters=5, attempts=10, 
     返回:
         分割结果掩码和标记图
     """
+    # 首先尝试专门针对黄色的检测
+    yellow_mask = detect_yellow_flower(image)
+    
     # 重塑图像以用于聚类
     h, w = image.shape[:2]
     reshaped = image.reshape(-1, 3)
@@ -93,17 +96,37 @@ def color_based_segmentation(image, method='kmeans', n_clusters=5, attempts=10, 
         # 获取聚类中心
         centers = kmeans.cluster_centers_
         
-        # 计算每个聚类中心的亮度
-        brightnesses = np.sum(centers, axis=1)
+        # 计算每个聚类中心是否可能是黄色花朵
+        is_yellow = []
+        for center in centers:
+            b, g, r = center
+            # 黄色特征: r和g值较高，b值较低
+            yellow_score = (r + g) / 2 - b
+            is_yellow.append(yellow_score)
         
-        # 识别最亮的聚类(可能是花朵区域)
-        brightest_cluster = np.argmax(brightnesses)
+        # 找到最可能是黄色花朵的簇
+        yellow_cluster = np.argmax(is_yellow)
         
-        # 创建掩码，标记可能的花朵区域
+        # 创建掩码，标记黄色花朵区域
         mask = np.zeros((h, w), dtype=np.uint8)
-        mask[segmented == brightest_cluster] = 255
+        mask[segmented == yellow_cluster] = 255
+        
+        # 如果有特定的黄色检测，融合结果
+        if yellow_mask is not None:
+            # 结合K-means和专门的黄色检测
+            combined_mask = cv2.bitwise_or(mask, yellow_mask)
+            return combined_mask, segmented
         
         return mask, segmented
+    
+    elif method == 'yellow_detect':
+        # 直接返回基于颜色阈值的黄色检测结果
+        if yellow_mask is not None:
+            return yellow_mask, None
+        else:
+            # 如果黄色检测失败，返回空掩码
+            mask = np.zeros((h, w), dtype=np.uint8)
+            return mask, None
     
     elif method == 'watershed':
         # 使用分水岭算法
@@ -138,6 +161,11 @@ def color_based_segmentation(image, method='kmeans', n_clusters=5, attempts=10, 
         mask = np.zeros_like(gray, dtype=np.uint8)
         mask[markers > 1] = 255
         
+        # 结合黄色检测
+        if yellow_mask is not None:
+            combined_mask = cv2.bitwise_and(mask, yellow_mask)
+            return combined_mask, markers
+        
         return mask, markers
     
     elif method == 'grabcut':
@@ -166,13 +194,80 @@ def color_based_segmentation(image, method='kmeans', n_clusters=5, attempts=10, 
         # 将可能的前景和确定的前景标记为前景
         grabcut_mask = np.where((mask == 2) | (mask == 0), 0, 1).astype('uint8') * 255
         
+        # 结合黄色检测
+        if yellow_mask is not None:
+            combined_mask = cv2.bitwise_and(grabcut_mask, yellow_mask)
+            return combined_mask, mask
+        
         return grabcut_mask, mask
     
     else:
-        # 默认返回空掩码
-        mask = np.zeros((h, w), dtype=np.uint8)
-        return mask, None
+        # 默认返回黄色检测结果，如果失败则返回空掩码
+        if yellow_mask is not None:
+            return yellow_mask, None
+        else:
+            mask = np.zeros((h, w), dtype=np.uint8)
+            return mask, None
 
+
+def detect_yellow_flower(image):
+    """
+    专门针对黄色花朵的颜色检测
+    
+    参数:
+        image: 输入图像(BGR)
+        
+    返回:
+        黄色区域的掩码
+    """
+    # 转换为HSV颜色空间以更好地检测黄色
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    
+    # 定义HSV中的黄色范围 - 宽松的范围捕获更多可能的黄色区域
+    # 黄色在HSV中的H通道大约在20-40之间
+    lower_yellow1 = np.array([15, 100, 100])
+    upper_yellow1 = np.array([40, 255, 255])
+    
+    # 创建黄色掩码
+    yellow_mask = cv2.inRange(hsv, lower_yellow1, upper_yellow1)
+    
+    # 为了捕获更多的黄色变体，可以尝试另一个范围
+    lower_yellow2 = np.array([40, 50, 180])
+    upper_yellow2 = np.array([60, 255, 255])
+    yellow_mask2 = cv2.inRange(hsv, lower_yellow2, upper_yellow2)
+    
+    # 合并两个掩码
+    yellow_mask = cv2.bitwise_or(yellow_mask, yellow_mask2)
+    
+    # 对掩码进行形态学操作，去除噪点并填充空洞
+    kernel = np.ones((5, 5), np.uint8)
+    yellow_mask = cv2.morphologyEx(yellow_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+    
+    # 如果是LAB色彩空间，也尝试增强检测
+    # 在LAB空间中，b通道正值表示黄色
+    lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    
+    # 强调b通道（黄色-蓝色）正值区域
+    _, b_thresh = cv2.threshold(b, 150, 255, cv2.THRESH_BINARY)
+    
+    # 与HSV掩码合并
+    yellow_mask = cv2.bitwise_or(yellow_mask, b_thresh)
+    
+    # 提高对强烈黄色区域的检测  
+    # 在RGB空间直接检测黄色，作为辅助手段
+    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    r, g, b = cv2.split(rgb)
+    
+    # 黄色: 高R高G低B
+    yellow_regions = np.zeros_like(r)
+    # 确保R和G值高且B值低
+    yellow_regions[(r > 150) & (g > 150) & (b < 100)] = 255
+    
+    # 合并到最终掩码
+    yellow_mask = cv2.bitwise_or(yellow_mask, yellow_regions)
+    
+    return yellow_mask
 
 def edge_detection(image, method='canny', threshold1=50, threshold2=150, aperture_size=3):
     """
