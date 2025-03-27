@@ -134,7 +134,7 @@ python semantic_segmentation.py --input_dir <分割结果目录> --ground_truth_
 ![输入图像](examples/input.jpg)
 
 掩码图像：
-![掩码图像](examples/mask.jpg)
+![掩码图像](examples/mask.png)
 
 输出结果：
 ![输出结果](examples/output.jpg)
