@@ -58,7 +58,7 @@ def process_image(image_path, config, ground_truth_path=None, visualize=False, p
     preprocessed = preprocess_image(image, config.preprocessing)
     
     # 颜色空间转换
-    converted = convert_color_space(preprocessed, config.color_space.space)
+    converted = convert_color_space(preprocessed, config.color_space['space'])
     
     # 分割
     segmented, masks, features = segment_flower(converted, preprocessed, config.segmentation)
