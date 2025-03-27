@@ -59,13 +59,85 @@ def threshold_segmentation(image, method='adaptive', block_size=11, constant=2, 
     return mask
 
 
-def color_based_segmentation(image, method='kmeans', n_clusters=5, attempts=10, max_iterations=100):
+def detect_flower_colors(image):
     """
-    基于颜色的分割，特别优化对黄色花朵的识别
+    增强版颜色检测，支持多种花朵颜色
     
     参数:
         image: 输入图像(BGR)
-        method: 分割方法，可选 'kmeans', 'watershed', 'grabcut', 'yellow_detect'
+        
+    返回:
+        花朵颜色区域掩码
+    """
+    # 转换为不同颜色空间以获取更好的检测效果
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
+    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    
+    h, w = image.shape[:2]
+    combined_mask = np.zeros((h, w), dtype=np.uint8)
+    
+    # 检测黄色花朵
+    # HSV黄色范围1
+    lower_yellow1 = np.array([15, 70, 100])
+    upper_yellow1 = np.array([45, 255, 255])
+    yellow_mask1 = cv2.inRange(hsv, lower_yellow1, upper_yellow1)
+    
+    # HSV黄色范围2 - 更浅的黄色
+    lower_yellow2 = np.array([40, 40, 180])
+    upper_yellow2 = np.array([65, 255, 255])
+    yellow_mask2 = cv2.inRange(hsv, lower_yellow2, upper_yellow2)
+    
+    # 在LAB空间中 - b通道对应黄色
+    _, _, b_lab = cv2.split(lab)
+    _, b_thresh = cv2.threshold(b_lab, 140, 255, cv2.THRESH_BINARY)
+    
+    # 在RGB空间中 - 高R和G，低B
+    r, g, b = cv2.split(rgb)
+    yellow_rgb = np.zeros_like(r)
+    yellow_rgb[(r > 140) & (g > 140) & (b < r-30)] = 255
+    
+    # 合并黄色掩码
+    yellow_mask = cv2.bitwise_or(yellow_mask1, yellow_mask2)
+    yellow_mask = cv2.bitwise_or(yellow_mask, b_thresh)
+    yellow_mask = cv2.bitwise_or(yellow_mask, yellow_rgb)
+    
+    # 检测白色花朵
+    # 在HSV空间中 - 高V低S
+    h_hsv, s_hsv, v_hsv = cv2.split(hsv)
+    white_mask = np.zeros_like(h_hsv)
+    white_mask[(v_hsv > 180) & (s_hsv < 80)] = 255
+    
+    # 在LAB空间中 - 高L
+    l_lab, _, _ = cv2.split(lab)
+    _, l_thresh = cv2.threshold(l_lab, 180, 255, cv2.THRESH_BINARY)
+    
+    # 在RGB空间中 - 所有通道都高
+    white_rgb = np.zeros_like(r)
+    white_rgb[(r > 180) & (g > 180) & (b > 180)] = 255
+    
+    # 合并白色掩码
+    white_mask = cv2.bitwise_or(white_mask, l_thresh)
+    white_mask = cv2.bitwise_or(white_mask, white_rgb)
+    
+    # 将黄色和白色掩码合并到最终掩码
+    combined_mask = cv2.bitwise_or(combined_mask, yellow_mask)
+    combined_mask = cv2.bitwise_or(combined_mask, white_mask)
+    
+    # 进行形态学操作，改善掩码质量
+    kernel = np.ones((5, 5), np.uint8)
+    combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+    
+    return combined_mask
+
+
+def color_based_segmentation(image, method='kmeans', n_clusters=5, attempts=10, max_iterations=100):
+    """
+    基于颜色的分割，优化对各种颜色花朵的识别
+    
+    参数:
+        image: 输入图像(BGR)
+        method: 分割方法，可选 'kmeans', 'watershed', 'grabcut', 'color_detect'
         n_clusters: K-means聚类数
         attempts: K-means尝试次数
         max_iterations: K-means最大迭代次数
@@ -73,8 +145,8 @@ def color_based_segmentation(image, method='kmeans', n_clusters=5, attempts=10, 
     返回:
         分割结果掩码和标记图
     """
-    # 首先尝试专门针对黄色的检测
-    yellow_mask = detect_yellow_flower(image)
+    # 首先使用增强版颜色检测
+    color_mask = detect_flower_colors(image)
     
     # 重塑图像以用于聚类
     h, w = image.shape[:2]
@@ -96,37 +168,33 @@ def color_based_segmentation(image, method='kmeans', n_clusters=5, attempts=10, 
         # 获取聚类中心
         centers = kmeans.cluster_centers_
         
-        # 计算每个聚类中心是否可能是黄色花朵
-        is_yellow = []
-        for center in centers:
+        # 创建掩码用于存储所有潜在花朵区域
+        cluster_mask = np.zeros((h, w), dtype=np.uint8)
+        
+        # 分析每个聚类，查找可能的花朵颜色
+        for i in range(n_clusters):
+            center = centers[i]
             b, g, r = center
-            # 黄色特征: r和g值较高，b值较低
-            yellow_score = (r + g) / 2 - b
-            is_yellow.append(yellow_score)
+            
+            # 跳过可能是绿色（叶子/茎/草）的聚类
+            if g > r+10 and g > b+10:
+                continue
+                
+            # 跳过可能是非常暗的区域（背景）
+            if r < 60 and g < 60 and b < 60:
+                continue
+                
+            # 添加这个聚类到掩码中
+            cluster_mask[segmented == i] = 255
         
-        # 找到最可能是黄色花朵的簇
-        yellow_cluster = np.argmax(is_yellow)
+        # 结合颜色检测和聚类结果
+        combined_mask = cv2.bitwise_or(color_mask, cluster_mask)
         
-        # 创建掩码，标记黄色花朵区域
-        mask = np.zeros((h, w), dtype=np.uint8)
-        mask[segmented == yellow_cluster] = 255
-        
-        # 如果有特定的黄色检测，融合结果
-        if yellow_mask is not None:
-            # 结合K-means和专门的黄色检测
-            combined_mask = cv2.bitwise_or(mask, yellow_mask)
-            return combined_mask, segmented
-        
-        return mask, segmented
+        return combined_mask, segmented
     
-    elif method == 'yellow_detect':
-        # 直接返回基于颜色阈值的黄色检测结果
-        if yellow_mask is not None:
-            return yellow_mask, None
-        else:
-            # 如果黄色检测失败，返回空掩码
-            mask = np.zeros((h, w), dtype=np.uint8)
-            return mask, None
+    elif method == 'color_detect':
+        # 直接返回基于颜色检测的结果
+        return color_mask, None
     
     elif method == 'watershed':
         # 使用分水岭算法
@@ -161,115 +229,71 @@ def color_based_segmentation(image, method='kmeans', n_clusters=5, attempts=10, 
         mask = np.zeros_like(gray, dtype=np.uint8)
         mask[markers > 1] = 255
         
-        # 结合黄色检测
-        if yellow_mask is not None:
-            combined_mask = cv2.bitwise_and(mask, yellow_mask)
-            return combined_mask, markers
+        # 结合颜色检测结果
+        combined_mask = cv2.bitwise_and(mask, color_mask)
         
-        return mask, markers
+        # 如果结合后的掩码太小，可能是颜色检测限制太严格，使用原始掩码
+        if np.sum(combined_mask) < np.sum(mask) * 0.3:
+            combined_mask = mask
+        
+        return combined_mask, markers
     
     elif method == 'grabcut':
         # 使用GrabCut算法
         # 初始化掩码
         mask = np.zeros(image.shape[:2], np.uint8)
         
-        # 假设矩形区域包含前景
-        rect = (10, 10, w - 20, h - 20)
+        # 使用颜色检测结果初始化GrabCut掩码
+        if np.sum(color_mask) > 0:
+            # 找到颜色检测掩码的边界矩形
+            y_indices, x_indices = np.where(color_mask > 0)
+            x_min, y_min = max(0, np.min(x_indices) - 10), max(0, np.min(y_indices) - 10)
+            x_max, y_max = min(w-1, np.max(x_indices) + 10), min(h-1, np.max(y_indices) + 10)
+            
+            rect = (x_min, y_min, x_max - x_min, y_max - y_min)
+            
+            # 将颜色检测的结果标记为可能的前景
+            mask[color_mask > 0] = cv2.GC_PR_FGD
+            mask[color_mask == 0] = cv2.GC_BGD
+        else:
+            # 如果颜色检测失败，使用中心区域初始化
+            rect = (w//4, h//4, w//2, h//2)
         
         # GrabCut所需的临时数组
         bgd_model = np.zeros((1, 65), np.float64)
         fgd_model = np.zeros((1, 65), np.float64)
         
         # 应用GrabCut
-        cv2.grabCut(
-            image, 
-            mask, 
-            rect, 
-            bgd_model, 
-            fgd_model, 
-            5, 
-            cv2.GC_INIT_WITH_RECT
-        )
-        
-        # 将可能的前景和确定的前景标记为前景
-        grabcut_mask = np.where((mask == 2) | (mask == 0), 0, 1).astype('uint8') * 255
-        
-        # 结合黄色检测
-        if yellow_mask is not None:
-            combined_mask = cv2.bitwise_and(grabcut_mask, yellow_mask)
-            return combined_mask, mask
-        
-        return grabcut_mask, mask
+        try:
+            if np.sum(color_mask) > 0:
+                cv2.grabCut(image, mask, rect, bgd_model, fgd_model, 5, cv2.GC_INIT_WITH_MASK)
+            else:
+                cv2.grabCut(image, mask, rect, bgd_model, fgd_model, 5, cv2.GC_INIT_WITH_RECT)
+            
+            # 创建最终掩码
+            grabcut_mask = np.zeros_like(mask)
+            grabcut_mask[(mask == cv2.GC_FGD) | (mask == cv2.GC_PR_FGD)] = 255
+            
+            # 如果GrabCut结果很小，可能是初始化问题，回退到颜色检测
+            if np.sum(grabcut_mask) < 100 and np.sum(color_mask) > 0:
+                return color_mask, mask
+            
+            return grabcut_mask, mask
+        except:
+            # 如果GrabCut失败，回退到颜色检测
+            if np.sum(color_mask) > 0:
+                return color_mask, None
+            
+            # 如果颜色检测也没有结果，返回空掩码
+            empty_mask = np.zeros((h, w), dtype=np.uint8)
+            return empty_mask, None
     
     else:
-        # 默认返回黄色检测结果，如果失败则返回空掩码
-        if yellow_mask is not None:
-            return yellow_mask, None
-        else:
-            mask = np.zeros((h, w), dtype=np.uint8)
-            return mask, None
+        # 默认返回颜色检测结果
+        return color_mask, None
 
 
-def detect_yellow_flower(image):
-    """
-    专门针对黄色花朵的颜色检测
-    
-    参数:
-        image: 输入图像(BGR)
-        
-    返回:
-        黄色区域的掩码
-    """
-    # 转换为HSV颜色空间以更好地检测黄色
-    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    
-    # 定义HSV中的黄色范围 - 宽松的范围捕获更多可能的黄色区域
-    # 黄色在HSV中的H通道大约在20-40之间
-    lower_yellow1 = np.array([15, 100, 100])
-    upper_yellow1 = np.array([40, 255, 255])
-    
-    # 创建黄色掩码
-    yellow_mask = cv2.inRange(hsv, lower_yellow1, upper_yellow1)
-    
-    # 为了捕获更多的黄色变体，可以尝试另一个范围
-    lower_yellow2 = np.array([40, 50, 180])
-    upper_yellow2 = np.array([60, 255, 255])
-    yellow_mask2 = cv2.inRange(hsv, lower_yellow2, upper_yellow2)
-    
-    # 合并两个掩码
-    yellow_mask = cv2.bitwise_or(yellow_mask, yellow_mask2)
-    
-    # 对掩码进行形态学操作，去除噪点并填充空洞
-    kernel = np.ones((5, 5), np.uint8)
-    yellow_mask = cv2.morphologyEx(yellow_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
-    
-    # 如果是LAB色彩空间，也尝试增强检测
-    # 在LAB空间中，b通道正值表示黄色
-    lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
-    l, a, b = cv2.split(lab)
-    
-    # 强调b通道（黄色-蓝色）正值区域
-    _, b_thresh = cv2.threshold(b, 150, 255, cv2.THRESH_BINARY)
-    
-    # 与HSV掩码合并
-    yellow_mask = cv2.bitwise_or(yellow_mask, b_thresh)
-    
-    # 提高对强烈黄色区域的检测  
-    # 在RGB空间直接检测黄色，作为辅助手段
-    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    r, g, b = cv2.split(rgb)
-    
-    # 黄色: 高R高G低B
-    yellow_regions = np.zeros_like(r)
-    # 确保R和G值高且B值低
-    yellow_regions[(r > 150) & (g > 150) & (b < 100)] = 255
-    
-    # 合并到最终掩码
-    yellow_mask = cv2.bitwise_or(yellow_mask, yellow_regions)
-    
-    return yellow_mask
-
-def edge_detection(image, method='canny', threshold1=50, threshold2=150, aperture_size=3):
+def edge_detection(image, method='canny', threshold1=30, threshold2=100, aperture_size=3):
     """
     基于边缘检测的分割
     
@@ -289,14 +313,38 @@ def edge_detection(image, method='canny', threshold1=50, threshold2=150, apertur
     else:
         gray = image.copy()
     
+    # 应用高斯模糊减少噪声
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    
     if method == 'canny':
         # Canny边缘检测
-        edges = cv2.Canny(gray, threshold1, threshold2, apertureSize=aperture_size)
+        edges = cv2.Canny(blurred, threshold1, threshold2, apertureSize=aperture_size)
+        
+        # 膨胀边缘以连接近邻边缘
+        kernel = np.ones((3, 3), np.uint8)
+        dilated_edges = cv2.dilate(edges, kernel, iterations=1)
+        
+        # 闭合边缘中的缝隙
+        closed_edges = cv2.morphologyEx(dilated_edges, cv2.MORPH_CLOSE, kernel, iterations=2)
+        
+        # 查找边缘图像中的轮廓
+        contours, _ = cv2.findContours(closed_edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        # 按面积过滤轮廓（移除微小轮廓）
+        h, w = gray.shape
+        min_area = 0.001 * h * w
+        filtered_contours = [cnt for cnt in contours if cv2.contourArea(cnt) > min_area]
+        
+        # 创建边缘掩码
+        edge_mask = np.zeros((h, w), dtype=np.uint8)
+        cv2.drawContours(edge_mask, filtered_contours, -1, 255, -1)
+        
+        return edge_mask
     
     elif method == 'sobel':
         # Sobel边缘检测
-        sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=aperture_size)
-        sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=aperture_size)
+        sobelx = cv2.Sobel(blurred, cv2.CV_64F, 1, 0, ksize=aperture_size)
+        sobely = cv2.Sobel(blurred, cv2.CV_64F, 0, 1, ksize=aperture_size)
         
         # 计算梯度幅值
         magnitude = np.sqrt(sobelx**2 + sobely**2)
@@ -306,10 +354,16 @@ def edge_detection(image, method='canny', threshold1=50, threshold2=150, apertur
         
         # 阈值处理
         _, edges = cv2.threshold(magnitude, threshold1, 255, cv2.THRESH_BINARY)
+        
+        # 应用形态学操作改善边缘
+        kernel = np.ones((3, 3), np.uint8)
+        edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel, iterations=2)
+        
+        return edges
     
     elif method == 'laplacian':
         # Laplacian边缘检测
-        laplacian = cv2.Laplacian(gray, cv2.CV_64F, ksize=aperture_size)
+        laplacian = cv2.Laplacian(blurred, cv2.CV_64F, ksize=aperture_size)
         
         # 取绝对值并归一化
         laplacian = np.abs(laplacian)
@@ -317,15 +371,28 @@ def edge_detection(image, method='canny', threshold1=50, threshold2=150, apertur
         
         # 阈值处理
         _, edges = cv2.threshold(laplacian, threshold1, 255, cv2.THRESH_BINARY)
+        
+        # 应用形态学操作改善边缘
+        kernel = np.ones((3, 3), np.uint8)
+        edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel, iterations=2)
+        
+        return edges
     
     else:
         # 默认使用Canny
-        edges = cv2.Canny(gray, threshold1, threshold2, apertureSize=aperture_size)
-    
-    return edges
+        edges = cv2.Canny(blurred, threshold1, threshold2, apertureSize=aperture_size)
+        
+        # 膨胀边缘以连接近邻边缘
+        kernel = np.ones((3, 3), np.uint8)
+        dilated_edges = cv2.dilate(edges, kernel, iterations=1)
+        
+        # 闭合边缘中的缝隙
+        closed_edges = cv2.morphologyEx(dilated_edges, cv2.MORPH_CLOSE, kernel, iterations=2)
+        
+        return closed_edges
 
 
-def region_growing(image, seed_selection='auto', threshold=10, connectivity=8):
+def region_growing(image, seed_selection='auto', threshold=15, connectivity=8):
     """
     区域生长分割
     
@@ -365,9 +432,11 @@ def region_growing(image, seed_selection='auto', threshold=10, connectivity=8):
                 cy = int(M["m01"] / M["m00"])
                 seeds = [(cy, cx)]
             else:
-                seeds = [(h//2, w//2)]
+                # 如果无法计算中心点，尝试多个种子点
+                seeds = [(h//4, w//4), (h//4, 3*w//4), (3*h//4, w//4), (3*h//4, 3*w//4), (h//2, w//2)]
         else:
-            seeds = [(h//2, w//2)]
+            # 如果没有找到轮廓，尝试多个种子点
+            seeds = [(h//4, w//4), (h//4, 3*w//4), (3*h//4, w//4), (3*h//4, 3*w//4), (h//2, w//2)]
     
     # 区域生长
     for seed_y, seed_x in seeds:
@@ -425,7 +494,7 @@ def segment_flower(image, original_image=None, config=None):
             'threshold': {'enabled': True, 'method': 'adaptive'},
             'color': {'enabled': True, 'method': 'kmeans'},
             'edge': {'enabled': True, 'method': 'canny'},
-            'region': {'enabled': False}
+            'region': {'enabled': True}
         }
     
     # 转换为灰度图（如果需要）
@@ -461,14 +530,20 @@ def segment_flower(image, original_image=None, config=None):
         )
         masks['color'] = color_mask
         features['color_segments'] = color_segments
+        
+        # 增加对黄色和白色花朵的特殊处理
+        if np.sum(color_mask) > 0:
+            # 单独保存黄色掩码
+            yellow_mask = detect_flower_colors(original_image)
+            masks['yellow'] = yellow_mask
     
     # 边缘检测
     if config['edge']['enabled']:
         edge_mask = edge_detection(
             gray, 
             method=config['edge']['method'],
-            threshold1=config['edge'].get('threshold1', 50),
-            threshold2=config['edge'].get('threshold2', 150),
+            threshold1=config['edge'].get('threshold1', 30),
+            threshold2=config['edge'].get('threshold2', 100),
             aperture_size=config['edge'].get('aperture_size', 3)
         )
         masks['edge'] = edge_mask
@@ -478,26 +553,37 @@ def segment_flower(image, original_image=None, config=None):
         region_mask = region_growing(
             gray, 
             seed_selection=config['region'].get('seed_selection', 'auto'),
-            threshold=config['region'].get('threshold', 10),
+            threshold=config['region'].get('threshold', 15),
             connectivity=config['region'].get('connectivity', 8)
         )
         masks['region'] = region_mask
     
-    # 组合所有掩码创建最终分割结果
-    # 这里使用简单的投票机制，可以根据需要进行优化
+    # 最终分割结果
+    # 使用加权投票机制，颜色分割有更高权重
     final_mask = np.zeros_like(gray, dtype=np.uint8)
     
     if masks:
         # 初始化投票矩阵
         votes = np.zeros_like(gray, dtype=np.float32)
         
-        # 每个方法进行投票
-        for method, mask in masks.items():
-            votes = votes + (mask / 255.0)
+        # 颜色分割有更高权重
+        color_weight = 1.5
+        if 'color' in masks:
+            votes = votes + (masks['color'] / 255.0) * color_weight
         
-        # 如果超过半数方法认为是前景，则标记为前景
-        threshold = len(masks) / 2.0
+        # 其他方法投票
+        for method, mask in masks.items():
+            if method != 'color' and method != 'yellow':
+                votes = votes + (mask / 255.0)
+        
+        # 如果超过一半方法认为是前景，则标记为前景
+        threshold = (len(masks) - 1 + color_weight) / 2.0
         final_mask[votes >= threshold] = 255
+        
+        # 如果颜色分割生成的掩码不为空，且投票结果较小，可能是投票阈值太高
+        # 在这种情况下，更信任颜色分割的结果
+        if 'color' in masks and np.sum(final_mask) < np.sum(masks['color']) * 0.5:
+            final_mask = masks['color']
     
     # 应用最终掩码到原始图像
     segmented = cv2.bitwise_and(original_image, original_image, mask=final_mask)

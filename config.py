@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-配置文件，包含所有可调整的参数 - 针对黄色花朵优化
+配置文件，包含所有可调整的参数 - 针对多种颜色花朵优化
 """
 
 class Config:
@@ -43,7 +43,7 @@ class Config:
             }
         }
         
-        # 颜色空间转换参数 - 针对黄色花朵优化
+        # 颜色空间转换参数 - 通用优化
         self.color_space = {
             'space': 'hsv',  # 'rgb', 'hsv', 'lab', 'ycrcb'
             'channels': [0, 1, 2]  # 用于分割的通道索引
@@ -59,11 +59,11 @@ class Config:
                 'constant': 2,
                 'max_value': 255
             },
-            # 颜色分割 - 优化对黄色的识别
+            # 颜色分割 - 优化对各种颜色花朵的识别
             'color': {
                 'enabled': True,
-                'method': 'kmeans',  # 'kmeans', 'watershed', 'grabcut'
-                'n_clusters': 4,  # 减少聚类数提高对主要黄色区域的识别
+                'method': 'kmeans',  # 'kmeans', 'watershed', 'grabcut', 'color_detect'
+                'n_clusters': 5,  # 增加聚类数，识别更多颜色
                 'attempts': 15,  # 增加尝试次数提高稳定性
                 'max_iterations': 150  # 增加迭代次数
             },
@@ -72,12 +72,12 @@ class Config:
                 'enabled': True,
                 'method': 'canny',  # 'canny', 'sobel', 'laplacian'
                 'threshold1': 30,  # 降低阈值捕获更多边缘
-                'threshold2': 120,
+                'threshold2': 100,
                 'aperture_size': 3
             },
             # 区域生长
             'region': {
-                'enabled': True,  # 启用区域生长
+                'enabled': True,
                 'seed_selection': 'auto',  # 'auto', 'center'
                 'threshold': 15,  # 增加阈值以包含更多相似颜色
                 'connectivity': 8
@@ -113,18 +113,18 @@ class Config:
             # 连通区域分析
             'connected_components': {
                 'enabled': True,
-                'min_area_ratio': 0.005,  # 减小该值以保留更小的区域
-                'max_num_components': 3   # 限制最大连通区域数量
+                'min_area_ratio': 0.001,  # 减小该值以保留更小的区域
+                'max_num_components': 5   # 增加保留区域数量
             },
             # 边界平滑
             'contour_smoothing': {
                 'enabled': True,
-                'method': 'gaussian',  # 'gaussian', 'median'
-                'kernel_size': 7  # 增大平滑核
+                'method': 'combined',  # 'gaussian', 'median', 'combined', 'contour'
+                'kernel_size': 5  # 减小平滑核，保留更多细节
             },
             # 孔洞填充
             'hole_filling': {
                 'enabled': True,
-                'min_hole_area': 10  # 减小该值填充更小的空洞
+                'min_hole_area': 5  # 减小该值填充更小的空洞
             }
         }

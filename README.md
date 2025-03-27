@@ -1,6 +1,6 @@
 # 花朵分割与分类系统
 
-本项目是COMP2032 (Introduction to Image Processing) 课程的作业，实现了一个完整的花朵分割和分类系统。该系统可以从图像中分割出花朵，并使用语义分割方法对它们进行分类。
+本项目是COMP2032 (Introduction to Image Processing) 课程的作业，实现了一个完整的花朵分割和分类系统。该系统使用掩码从图像中分割出花朵，并使用语义分割方法对它们进行分类。
 
 ## 项目结构
 
@@ -37,12 +37,17 @@ flower_segmentation_classification/
 本项目依赖于以下Python库：
 
 ```
-opencv-python>=4.5.5
-numpy>=1.23.5
-matplotlib>=3.4.0
-scikit-learn>=1.1.1
-scikit-image>=0.19.0
-tqdm>=4.62.0
+opencv-python
+numpy
+matplotlib
+scikit-learn
+scikit-image
+torch
+torchvision
+transformers
+tqdm
+pandas
+Pillow
 ```
 
 可以使用以下命令安装依赖：
@@ -51,27 +56,39 @@ tqdm>=4.62.0
 pip install -r requirements.txt
 ```
 
+## 处理流程
+
+本项目的处理流程包含以下主要步骤：
+
+1. **掩码提取**: 从ground_truth目录中读取包含红色区域的掩码图像
+2. **掩码转换**: 将红色掩码转换为二值掩码（白色为花朵区域，黑色为背景）
+3. **花朵提取**: 使用二值掩码从对应的原始图像中提取花朵区域
+4. **黑色背景合成**: 将提取的花朵放在黑色背景上生成最终输出
+
+### 图像处理流程示例
+
+![处理流程示例](image-processing-pipeline/pipeline_steps.jpg)
+暂时留空
+
 ## 使用方法
 
 ### 基本使用
 
 ```bash
-python main.py --input_dir <输入图像目录> --ground_truth_dir <真实掩码目录> --output_dir <输出目录>
+python main.py --input_dir <输入图像目录> --mask_dir <掩码图像目录> --output_dir <输出目录>
 ```
 
 ### 参数说明
 
 - `--input_dir`: 输入图像目录，默认为 'input-image'
-- `--ground_truth_dir`: 真实掩码目录，默认为 'ground-truth'
+- `--mask_dir`: 掩码图像目录，默认为 'ground-truth'
 - `--output_dir`: 输出目录，默认为 'output'
-- `--pipeline_dir`: 处理流程可视化目录，默认为 'image-processing-pipeline'
 - `--difficulty`: 处理的图像难度，可选 'all', 'easy', 'medium', 'hard'，默认为 'all'
-- `--eval`: 是否评估分割结果，默认为 False
-- `--visualize`: 是否保存处理流程的可视化结果，默认为 False
+- `--single_file`: 处理单个文件而不是整个目录
 
 ### 目录结构要求
 
-输入图像和真实掩码应按以下结构组织：
+输入图像和掩码图像应按以下结构组织：
 
 ```
 input-image/
@@ -97,48 +114,34 @@ ground-truth/
 │   └── image_006.png
 ```
 
-## 图像处理流程
+## 语义分割部分
 
-本系统的图像处理流程包含以下主要步骤：
+提取花朵后，系统使用Transformer模型对分割的花朵进行分类：
 
-1. **预处理**: 图像尺寸调整、去噪、对比度增强等
-2. **颜色空间转换**: 将图像转换到合适的颜色空间（如HSV, LAB）以便更好地分割
-3. **分割**: 使用多种方法（阈值分割、颜色聚类、边缘检测等）分割花朵
-4. **后处理**: 形态学操作、连通区域分析、边界平滑等改进分割结果
-5. **评估**: 计算IoU、Dice系数等评估指标
+1. 首先将分割后的花朵输入到Transformer模型
+2. 通过模型提取特征并计算与ground truth的余弦相似度
+3. 根据相似度阈值判断分类准确性
 
-## 配置调整
+运行语义分割评估：
 
-可以在 `config.py` 文件中调整各个处理步骤的参数，例如：
-
-- 预处理参数（图像大小、去噪方法等）
-- 颜色空间选择
-- 分割算法参数
-- 后处理参数
-
-## 评估指标
-
-系统支持多种评估指标，包括：
-
-- IoU (Intersection over Union)
-- Dice系数
-- 精确率和召回率
-- 边界F1分数
+```bash
+python semantic_segmentation.py --input_dir <分割结果目录> --ground_truth_dir <真实掩码目录> --model_path <Transformer模型路径>
+```
 
 ## 示例结果
 
-运行示例：
+输入图像：
+![输入图像](examples/input.jpg)
 
-```bash
-python main.py --input_dir samples/input --ground_truth_dir samples/ground_truth --output_dir results --eval --visualize
-```
+掩码图像：
+![掩码图像](examples/mask.jpg)
 
-## 语义分割与分类
-
-完成花朵分割后，系统使用提供的Transformer模型对分割的花朵进行分类。分类结果以余弦相似度和准确率进行评估。
+输出结果：
+![输出结果](examples/output.jpg)
 
 ## 注意事项
 
-- 确保输入图像和真实掩码的文件名相匹配
+- 确保输入图像和掩码图像的文件名相匹配
+- 掩码图像中的红色区域将被识别为花朵区域
 - 系统默认处理.jpg和.png格式的图像
-- 评估模式需要真实掩码数据
+- 评估模式需要真实掩码数据和Transformer模型
