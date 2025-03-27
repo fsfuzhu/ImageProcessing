@@ -65,11 +65,6 @@ pip install -r requirements.txt
 3. **花朵提取**: 使用二值掩码从对应的原始图像中提取花朵区域
 4. **黑色背景合成**: 将提取的花朵放在黑色背景上生成最终输出
 
-### 图像处理流程示例
-
-![处理流程示例](image-processing-pipeline/pipeline_steps.jpg)
-暂时留空
-
 ## 使用方法
 
 ### 基本使用
@@ -83,7 +78,6 @@ python main.py --input_dir <输入图像目录> --mask_dir <掩码图像目录> 
 - `--input_dir`: 输入图像目录，默认为 'input-image'
 - `--mask_dir`: 掩码图像目录，默认为 'ground-truth'
 - `--output_dir`: 输出目录，默认为 'output'
-- `--difficulty`: 处理的图像难度，可选 'all', 'easy', 'medium', 'hard'，默认为 'all'
 - `--single_file`: 处理单个文件而不是整个目录
 
 ### 目录结构要求
