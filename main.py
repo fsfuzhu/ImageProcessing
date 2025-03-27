@@ -67,7 +67,23 @@ def process_image(image_path, config, ground_truth_path=None, visualize=False, p
     final_mask = postprocess_mask(masks, features, config.postprocessing)
     
     # 应用掩码到原始图像
-    segmented_flower = cv2.bitwise_and(image, image, mask=final_mask)
+    # Ensure mask is properly formatted before using it
+    if final_mask is not None:
+        # Convert mask to proper format if needed
+        mask_8bit = final_mask.astype('uint8') if final_mask is not None else None
+        # Ensure mask has the same dimensions as the image
+        if mask_8bit is not None and mask_8bit.shape[:2] != image.shape[:2]:
+            mask_8bit = cv2.resize(mask_8bit, (image.shape[1], image.shape[0]))
+        # Apply bitwise operation with proper error handling
+        try:
+            segmented_flower = cv2.bitwise_and(image, image, mask=mask_8bit)
+        except cv2.error as e:
+            print(f"OpenCV error: {e}")
+            # Fallback: Just use the original image if mask fails
+            segmented_flower = image.copy()
+    else:
+        # If mask is None, just use the original image
+        segmented_flower = image.copy()
     
     # 创建黑色背景
     black_background = np.zeros_like(image)
