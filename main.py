@@ -100,8 +100,6 @@ def main():
                         help='Directory containing mask images')
     parser.add_argument('--output_dir', type=str, default='output',
                         help='Directory to save output segmented images')
-    parser.add_argument('--difficulty', type=str, choices=['all', 'easy', 'medium', 'hard'], default='all',
-                        help='Difficulty level of images to process')
     parser.add_argument('--single_file', type=str, default=None,
                         help='Process a single file instead of a directory')
     args = parser.parse_args()
@@ -135,55 +133,48 @@ def main():
         
         return
     
-    # 准备子目录
-    difficulties = ['easy', 'medium', 'hard'] if args.difficulty == 'all' else [args.difficulty]
+    # 确保输出目录存在
+    ensure_dir(args.output_dir)
     
-    for diff in difficulties:
-        # 确保输出子目录存在
-        output_subdir = os.path.join(args.output_dir, diff)
-        ensure_dir(output_subdir)
+    # 检查输入和掩码目录是否存在
+    if not os.path.exists(args.input_dir):
+        print(f"Error: Input directory {args.input_dir} does not exist.")
+        return
+    
+    if not os.path.exists(args.mask_dir):
+        print(f"Error: Mask directory {args.mask_dir} does not exist.")
+        return
+    
+    # 获取掩码文件列表
+    mask_files = glob.glob(os.path.join(args.mask_dir, "*.png")) + \
+                glob.glob(os.path.join(args.mask_dir, "*.jpg"))
+    
+    print(f"Found {len(mask_files)} mask files in {args.mask_dir}")
+    
+    # 处理每个掩码文件
+    success_count = 0
+    for mask_file in tqdm(mask_files):
+        # 获取文件名和对应的输入图像
+        filename = get_filename(mask_file)
+        input_file = None
         
-        # 获取掩码文件列表
-        mask_subdir = os.path.join(args.mask_dir, diff)
-        input_subdir = os.path.join(args.input_dir, diff)
+        # 尝试不同的扩展名查找对应的输入图像
+        for ext in ['.png', '.jpg', '.jpeg']:
+            input_path = os.path.join(args.input_dir, f"{filename}{ext}")
+            if os.path.exists(input_path):
+                input_file = input_path
+                break
         
-        if not os.path.exists(mask_subdir):
-            print(f"Warning: Mask directory {mask_subdir} does not exist. Skipping.")
+        if input_file is None:
+            print(f"Warning: Could not find corresponding input image for mask {mask_file}")
             continue
         
-        if not os.path.exists(input_subdir):
-            print(f"Warning: Input directory {input_subdir} does not exist. Skipping.")
-            continue
-        
-        mask_files = glob.glob(os.path.join(mask_subdir, "*.png")) + \
-                    glob.glob(os.path.join(mask_subdir, "*.jpg"))
-        
-        print(f"Processing {len(mask_files)} images in '{diff}' category...")
-        
-        # 处理每个掩码文件
-        success_count = 0
-        for mask_file in tqdm(mask_files):
-            # 获取文件名和对应的输入图像
-            filename = get_filename(mask_file)
-            input_file = None
-            
-            for ext in ['.png', '.jpg', '.jpeg']:
-                input_path = os.path.join(input_subdir, f"{filename}{ext}")
-                if os.path.exists(input_path):
-                    input_file = input_path
-                    break
-            
-            if input_file is None:
-                print(f"Warning: Could not find corresponding input image for mask {mask_file}")
-                continue
-            
-            # 处理图像
-            output_path = os.path.join(output_subdir, f"{filename}.jpg")
-            if process_image_with_mask(input_file, mask_file, output_path):
-                success_count += 1
-        
-        print(f"Successfully processed {success_count} out of {len(mask_files)} images in '{diff}' category.")
+        # 处理图像
+        output_path = os.path.join(args.output_dir, f"{filename}.jpg")
+        if process_image_with_mask(input_file, mask_file, output_path):
+            success_count += 1
     
+    print(f"Successfully processed {success_count} out of {len(mask_files)} images.")
     print("All processing completed!")
 
 
