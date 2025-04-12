@@ -2,9 +2,9 @@
 # -*- coding: utf-8 -*-
 
 """
-COMP2032 Coursework - Group 13
-Morphological Operations Implementation
-Based on Lecture 5 - Morphology
+COMP2032 Coursework - 通用版本
+形态学操作实现
+基于讲座5 - 形态学
 """
 
 import cv2
@@ -12,151 +12,151 @@ import numpy as np
 
 def apply_erosion(image, kernel_size=3):
     """
-    Apply morphological erosion
+    应用形态学腐蚀
     
-    Erosion shrinks the foreground (white) regions of a binary image.
-    It's useful for removing small noise and separating connected objects.
+    腐蚀收缩二值图像的前景（白色）区域。
+    它有助于去除小噪点并分离连接的对象。
     
     Args:
-        image: Binary input image
-        kernel_size: Size of the square structuring element
+        image: 二值输入图像
+        kernel_size: 方形结构元素的大小
         
     Returns:
-        Eroded binary image
+        腐蚀后的二值图像
     """
     kernel = np.ones((kernel_size, kernel_size), np.uint8)
     return cv2.erode(image, kernel, iterations=1)
 
 def apply_dilation(image, kernel_size=3):
     """
-    Apply morphological dilation
+    应用形态学膨胀
     
-    Dilation expands the foreground (white) regions of a binary image.
-    It's useful for filling small holes and connecting broken parts.
+    膨胀扩大二值图像的前景（白色）区域。
+    它有助于填充小孔洞并连接断开的部分。
     
     Args:
-        image: Binary input image
-        kernel_size: Size of the square structuring element
+        image: 二值输入图像
+        kernel_size: 方形结构元素的大小
         
     Returns:
-        Dilated binary image
+        膨胀后的二值图像
     """
     kernel = np.ones((kernel_size, kernel_size), np.uint8)
     return cv2.dilate(image, kernel, iterations=1)
 
 def apply_opening(image, kernel_size=3):
     """
-    Apply morphological opening (erosion followed by dilation)
+    应用形态学开运算（先腐蚀后膨胀）
     
-    Opening removes small objects from the foreground (white) regions
-    while preserving the shape and size of larger objects.
+    开运算去除前景（白色）区域的小对象，
+    同时保留较大对象的形状和大小。
     
     Args:
-        image: Binary input image
-        kernel_size: Size of the square structuring element
+        image: 二值输入图像
+        kernel_size: 方形结构元素的大小
         
     Returns:
-        Opened binary image
+        开运算后的二值图像
     """
     kernel = np.ones((kernel_size, kernel_size), np.uint8)
     return cv2.morphologyEx(image, cv2.MORPH_OPEN, kernel)
 
 def apply_closing(image, kernel_size=3):
     """
-    Apply morphological closing (dilation followed by erosion)
+    应用形态学闭运算（先膨胀后腐蚀）
     
-    Closing fills small holes in the foreground (white) regions
-    while preserving the shape and size of the objects.
+    闭运算填充前景（白色）区域的小孔洞，
+    同时保留对象的形状和大小。
     
     Args:
-        image: Binary input image
-        kernel_size: Size of the square structuring element
+        image: 二值输入图像
+        kernel_size: 方形结构元素的大小
         
     Returns:
-        Closed binary image
+        闭运算后的二值图像
     """
     kernel = np.ones((kernel_size, kernel_size), np.uint8)
     return cv2.morphologyEx(image, cv2.MORPH_CLOSE, kernel)
 
-def apply_morphology(image, kernel_size=5):
+def apply_advanced_morphology(image, kernel_size=5):
     """
-    Apply a sequence of morphological operations for optimal cleaning
+    应用高级形态学操作序列
     
-    This function applies a series of morphological operations to
-    clean up a binary segmentation mask:
-    1. Opening to remove small noise
-    2. Closing to fill holes in the main object
-    3. Erosion to refine the boundary
-    4. Dilation to restore the original size
+    这个函数应用一系列针对花朵分割优化的形态学操作：
+    1. 先应用闭运算填充孔洞
+    2. 应用开运算去除小噪声
+    3. 应用顶帽变换增强边缘
     
     Args:
-        image: Binary input image
-        kernel_size: Size of the square structuring element
+        image: 二值输入图像
+        kernel_size: 方形结构元素的大小
         
     Returns:
-        Processed binary image
+        处理后的二值图像
     """
-    # Create kernels of different sizes for different operations
+    # 创建不同大小的核，用于不同操作
     kernel_small = np.ones((3, 3), np.uint8)
     kernel_medium = np.ones((kernel_size, kernel_size), np.uint8)
     kernel_large = np.ones((kernel_size + 2, kernel_size + 2), np.uint8)
     
-    # 1. Apply opening to remove small noise
-    result = cv2.morphologyEx(image, cv2.MORPH_OPEN, kernel_small)
+    # 首先应用闭运算，填充花朵中小的孔洞
+    closed = cv2.morphologyEx(image, cv2.MORPH_CLOSE, kernel_large, iterations=2)
     
-    # 2. Apply closing to fill holes in the flower
-    result = cv2.morphologyEx(result, cv2.MORPH_CLOSE, kernel_large)
+    # 然后应用开运算，去除噪声和小的杂点
+    opened = cv2.morphologyEx(closed, cv2.MORPH_OPEN, kernel_small)
     
-    # 3. Apply erosion to refine boundaries
-    result = cv2.erode(result, kernel_small, iterations=1)
+    # 应用膨胀，确保花朵的连通性
+    dilated = cv2.dilate(opened, kernel_small, iterations=1)
     
-    # 4. Apply dilation to restore size
-    result = cv2.dilate(result, kernel_small, iterations=1)
+    # 应用顶帽变换突出小细节
+    tophat = cv2.morphologyEx(dilated, cv2.MORPH_TOPHAT, kernel_medium)
     
-    return result
+    # 将顶帽结果添加回去，增强边缘
+    enhanced = cv2.add(dilated, tophat)
+    
+    return enhanced
 
 def find_boundaries(image):
     """
-    Find the boundaries of objects in a binary image
+    查找二值图像中对象的边界
     
-    This function performs morphological gradient (dilation - erosion)
-    to find object boundaries.
+    这个函数执行形态学梯度（膨胀-腐蚀）来查找对象边界。
     
     Args:
-        image: Binary input image
+        image: 二值输入图像
         
     Returns:
-        Binary image with object boundaries
+        带有对象边界的二值图像
     """
     kernel = np.ones((3, 3), np.uint8)
     return cv2.morphologyEx(image, cv2.MORPH_GRADIENT, kernel)
 
 def fill_holes(image):
     """
-    Fill holes in the foreground regions of a binary image
+    填充二值图像前景区域中的孔洞
     
-    This function uses floodfill operation to fill holes in the foreground.
+    这个函数使用漫水填充操作来填充前景中的孔洞。
     
     Args:
-        image: Binary input image
+        image: 二值输入图像
         
     Returns:
-        Binary image with holes filled
+        孔洞已填充的二值图像
     """
-    # Copy the image and add a 1-pixel border
+    # 复制图像并添加1像素边界
     h, w = image.shape
     mask = np.zeros((h + 2, w + 2), np.uint8)
     
-    # Create a copy for floodfill
+    # 创建漫水填充的副本
     filled = image.copy()
     
-    # Fill from the border (background)
+    # 从边界（背景）填充
     cv2.floodFill(filled, mask, (0, 0), 255)
     
-    # Invert the filled image
+    # 反转填充的图像
     filled_inv = cv2.bitwise_not(filled)
     
-    # Combine with the original image
-    result = image | filled_inv
+    # 与原始图像组合
+    result = cv2.bitwise_or(image, filled_inv)
     
     return result

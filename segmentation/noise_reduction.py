@@ -2,9 +2,9 @@
 # -*- coding: utf-8 -*-
 
 """
-COMP2032 Coursework - Group 13
-Noise Reduction Implementation
-Based on Lecture 3A (Linear Filters) and 3B (Non-Linear Filters)
+COMP2032 Coursework - 通用版本
+噪声减少实现
+基于讲座3A（线性滤波器）和3B（非线性滤波器）
 """
 
 import cv2
@@ -12,123 +12,122 @@ import numpy as np
 
 def apply_mean_filter(image, kernel_size=(3, 3)):
     """
-    Apply a mean filter for noise reduction
+    应用均值滤波器进行噪声减少
     
-    Mean filtering is a simple spatial filter that replaces each pixel value
-    with the mean of its neighborhood. This is effective for removing
-    Gaussian noise but tends to blur edges.
+    均值滤波是一种简单的空间滤波器，它用其邻域的均值替换每个像素值。
+    这对于去除高斯噪声很有效，但会使边缘模糊。
     
     Args:
-        image: Input image as NumPy array
-        kernel_size: Size of the filter kernel as tuple (width, height)
+        image: 输入图像作为NumPy数组
+        kernel_size: 滤波器核的大小，作为元组(宽度, 高度)
         
     Returns:
-        Filtered image as NumPy array
+        滤波后的图像作为NumPy数组
     """
     return cv2.blur(image, kernel_size)
 
 def apply_gaussian_filter(image, kernel_size=(5, 5), sigma=0):
     """
-    Apply a Gaussian filter for noise reduction
+    应用高斯滤波器进行噪声减少
     
-    Gaussian filtering uses a weighted average where pixels closer to the center
-    have higher weights. This preserves edges better than mean filtering.
+    高斯滤波使用加权平均，其中更靠近中心的像素权重更高。
+    这比均值滤波更好地保留边缘。
     
     Args:
-        image: Input image as NumPy array
-        kernel_size: Size of the filter kernel as tuple (width, height)
-        sigma: Standard deviation of the Gaussian. If 0, it's calculated from kernel size.
+        image: 输入图像作为NumPy数组
+        kernel_size: 滤波器核的大小，作为元组(宽度, 高度)
+        sigma: 高斯的标准差。如果为0，则根据核大小计算。
         
     Returns:
-        Filtered image as NumPy array
+        滤波后的图像作为NumPy数组
     """
     return cv2.GaussianBlur(image, kernel_size, sigma)
 
 def apply_median_filter(image, kernel_size=3):
     """
-    Apply a median filter for noise reduction
+    应用中值滤波器进行噪声减少
     
-    Median filtering replaces each pixel with the median value of its neighborhood.
-    It's particularly effective at removing salt-and-pepper noise while preserving edges.
+    中值滤波用其邻域的中值替换每个像素。
+    它对去除椒盐噪声特别有效，同时保留边缘。
     
     Args:
-        image: Input image as NumPy array
-        kernel_size: Size of the square filter kernel (must be odd)
+        image: 输入图像作为NumPy数组
+        kernel_size: 方形滤波器核的大小（必须是奇数）
         
     Returns:
-        Filtered image as NumPy array
+        滤波后的图像作为NumPy数组
     """
     return cv2.medianBlur(image, kernel_size)
 
 def apply_bilateral_filter(image, d=9, sigma_color=75, sigma_space=75):
     """
-    Apply a bilateral filter for edge-preserving smoothing
+    应用双边滤波器进行边缘保留平滑
     
-    Bilateral filtering considers both spatial proximity and color similarity,
-    effectively preserving edges while smoothing flat regions.
+    双边滤波同时考虑空间接近度和颜色相似度，
+    有效地保留边缘，同时平滑平坦区域。
     
     Args:
-        image: Input image as NumPy array
-        d: Diameter of each pixel neighborhood
-        sigma_color: Filter sigma in the color space
-        sigma_space: Filter sigma in the coordinate space
+        image: 输入图像作为NumPy数组
+        d: 每个像素邻域的直径
+        sigma_color: 颜色空间中的滤波器sigma
+        sigma_space: 坐标空间中的滤波器sigma
         
     Returns:
-        Filtered image as NumPy array
+        滤波后的图像作为NumPy数组
     """
     return cv2.bilateralFilter(image, d, sigma_color, sigma_space)
 
 def apply_anisotropic_diffusion(image, iterations=5, k=25, gamma=0.1):
     """
-    Apply anisotropic diffusion filter (Perona-Malik)
+    应用各向异性扩散滤波器（Perona-Malik）
     
-    This is an implementation of the anisotropic diffusion filter based on
-    Lecture 3B. It smooths the image while preserving edges.
+    这是基于讲座3B的各向异性扩散滤波器的实现。
+    它在保留边缘的同时平滑图像。
     
     Args:
-        image: Input image as NumPy array
-        iterations: Number of iterations
-        k: Diffusion constant (controls the sensitivity to edges)
-        gamma: Controls the speed of diffusion
+        image: 输入图像作为NumPy数组
+        iterations: 迭代次数
+        k: 扩散常数（控制对边缘的敏感度）
+        gamma: 控制扩散速度
         
     Returns:
-        Filtered image as NumPy array
+        滤波后的图像作为NumPy数组
     """
-    # Convert to float32 for processing
+    # 转换为float32以进行处理
     img_float = image.astype(np.float32)
     
-    # Create output image
+    # 创建输出图像
     out = img_float.copy()
     
-    # Define the 4-neighborhood structure for diffusion
+    # 定义扩散的4邻域结构
     delta = [
-        (0, 1),   # right
-        (0, -1),  # left
-        (1, 0),   # down
-        (-1, 0)   # up
+        (0, 1),   # 右
+        (0, -1),  # 左
+        (1, 0),   # 下
+        (-1, 0)   # 上
     ]
     
-    # Apply diffusion iterations
+    # 应用扩散迭代
     for _ in range(iterations):
-        # Calculate the diffusion for each direction
+        # 计算每个方向的扩散
         diffusion = np.zeros_like(out)
         
         for dx, dy in delta:
-            # Compute shifted arrays
+            # 计算移位数组
             shifted = np.roll(np.roll(out, dy, axis=0), dx, axis=1)
             
-            # Calculate difference between current and shifted image
+            # 计算当前图像和移位图像之间的差异
             diff = shifted - out
             
-            # Apply the diffusion function (Perona-Malik)
+            # 应用扩散函数（Perona-Malik）
             # g(x) = 1 / (1 + (x/k)^2)
             g = 1.0 / (1.0 + (diff / k) ** 2)
             
-            # Accumulate the diffusion
+            # 累积扩散
             diffusion += g * diff
         
-        # Update the image
+        # 更新图像
         out += gamma * diffusion
     
-    # Convert back to uint8
+    # 转换回uint8
     return np.clip(out, 0, 255).astype(np.uint8)
