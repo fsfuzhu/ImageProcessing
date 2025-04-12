@@ -129,16 +129,34 @@ def evaluate_segmentation(segmented_dir, ground_truth_dir, difficulty_levels=Non
         
         for seg_path in segmented_paths:
             img_filename = os.path.basename(seg_path)
-            gt_path = os.path.join(level_gt_dir, img_filename)
+            # 尝试查找两种可能的扩展名
+            base_name = os.path.splitext(img_filename)[0]
+            possible_gt_paths = [
+                os.path.join(level_gt_dir, f"{base_name}.png"),
+                os.path.join(level_gt_dir, f"{base_name}.jpg")
+            ]
+            
+            # 尝试找到存在的真实标签文件
+            gt_path = None
+            for path in possible_gt_paths:
+                if os.path.exists(path):
+                    gt_path = path
+                    break
             
             # 如果找不到真实标签则跳过
-            if not os.path.exists(gt_path):
+            if gt_path is None:
                 print(f"  警告: 未找到 {img_filename} 的真实标签")
                 continue
             
             # 读取分割结果和真实标签
             segmented = cv2.imread(seg_path, cv2.IMREAD_GRAYSCALE)
             ground_truth = cv2.imread(gt_path, cv2.IMREAD_GRAYSCALE)
+            
+            # 确保两个掩码具有相同的尺寸
+            if segmented.shape != ground_truth.shape:
+                print(f"  调整 {img_filename} 的真实标签尺寸 {ground_truth.shape} -> {segmented.shape}")
+                ground_truth = cv2.resize(ground_truth, (segmented.shape[1], segmented.shape[0]), 
+                                         interpolation=cv2.INTER_NEAREST)
             
             # 确保二值掩码
             _, segmented = cv2.threshold(segmented, 1, 255, cv2.THRESH_BINARY)
@@ -165,7 +183,7 @@ def evaluate_segmentation(segmented_dir, ground_truth_dir, difficulty_levels=Non
         for k, v in total_metrics.items():
             avg_value = v / num_images
             print(f"平均 {k}: {avg_value:.4f}")
-
+            
 def main():
     """运行花朵分割管线的主函数"""
     parser = argparse.ArgumentParser(description="花朵分割管线")

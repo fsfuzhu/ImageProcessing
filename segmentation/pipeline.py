@@ -21,19 +21,19 @@ class FlowerSegmentationPipeline:
     def __init__(self):
         """初始化分割管线，使用通用参数"""
         # 基础参数
-        self.resize_dim = (256, 256)  # 调整大小以保持一致的处理
+        self.resize_dim = (500, 500)  # 调整大小以保持一致的处理
         
         # 增强和滤波参数
-        self.gaussian_kernel = (25, 25)  # 高斯滤波核大小
-        self.bilateral_d = 9  # 双边滤波直径
+        self.gaussian_kernel = (3, 3)  # 高斯滤波核大小
+        self.bilateral_d = 7  # 双边滤波直径
         self.bilateral_sigma = 75  # 双边滤波sigma参数
         
         # 阈值参数
         self.adaptive_block_size = 25  # 自适应阈值块大小
-        self.adaptive_c = 1  # 自适应阈值常数
+        self.adaptive_c = 2  # 自适应阈值常数
         
         # 分水岭参数
-        self.min_flower_size_ratio = 0.9  # 最小花朵尺寸比例
+        self.min_flower_size_ratio = 0.09  # 最小花朵尺寸比例
     
     def process(self, image):
         """
