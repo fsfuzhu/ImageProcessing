@@ -22,7 +22,7 @@ class FlowerSegmentationPipeline:
         """Initialize segmentation pipeline with parameters"""
         # Enhancement and filtering parameters
         self.gaussian_kernel = (3, 3)  # Gaussian filter kernel size
-        self.bilateral_d = 55  # Bilateral filter diameter
+        self.bilateral_d = 60  # Bilateral filter diameter
         self.bilateral_sigma = 50  # Bilateral filter sigma parameter
         
         # Threshold parameters
