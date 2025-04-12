@@ -169,13 +169,13 @@ def evaluate_segmentation(segmented_dir, ground_truth_dir, difficulty_levels=Non
 def main():
     """运行花朵分割管线的主函数"""
     parser = argparse.ArgumentParser(description="花朵分割管线")
-    parser.add_argument('--input', type=str, default='input-image',
+    parser.add_argument('--input', type=str, default='Dataset_1/input_images',
                         help='包含输入图像的目录')
     parser.add_argument('--output', type=str, default='output',
                         help='保存分割结果的目录')
     parser.add_argument('--pipeline', type=str, default='image-processing-pipeline',
                         help='保存中间管线步骤的目录')
-    parser.add_argument('--ground-truth', type=str, default='ground-truth',
+    parser.add_argument('--ground-truth', type=str, default='Dataset_1/ground_truths',
                         help='包含真实标签掩码的目录')
     parser.add_argument('--evaluate', action='store_true',
                         help='评估分割结果与真实标签的对比')
