@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
-COMP2032 Coursework - 通用版本（简化流程）
-花朵分割管线实现 - 以分水岭分割为主要方法
+COMP2032 Coursework - Modified Pipeline
+Flower segmentation pipeline with smooth edge preservation
 """
 
 import cv2
@@ -15,71 +15,71 @@ from .morphology import fill_holes
 
 class FlowerSegmentationPipeline:
     """
-    通用的花朵分割管线，使用分水岭分割作为主要方法
+    Modified flower segmentation pipeline with edge feathering for natural-looking results
     """
     
     def __init__(self):
-        """初始化分割管线，使用通用参数"""
-        # 不再使用固定的resize_dim，保持原始图像尺寸
+        """Initialize segmentation pipeline with parameters"""
+        # Enhancement and filtering parameters
+        self.gaussian_kernel = (3, 3)  # Gaussian filter kernel size
+        self.bilateral_d = 55  # Bilateral filter diameter
+        self.bilateral_sigma = 50  # Bilateral filter sigma parameter
         
-        # 增强和滤波参数
-        self.gaussian_kernel = (3, 3)  # 高斯滤波核大小
-        self.bilateral_d = 7  # 双边滤波直径
-        self.bilateral_sigma = 75  # 双边滤波sigma参数
+        # Threshold parameters
+        self.adaptive_block_size = 15  # Adaptive threshold block size
+        self.adaptive_c = 1  # Adaptive threshold constant
         
-        # 阈值参数
-        self.adaptive_block_size = 25  # 自适应阈值块大小
-        self.adaptive_c = 2  # 自适应阈值常数
+        # Edge feathering parameters
+        self.edge_blur_size = 11  # Size of Gaussian blur for edge feathering
+        self.feather_amount = 12  # Amount of feathering to apply
         
-        # 分水岭参数
-        self.min_flower_size_ratio = 1  # 最小花朵尺寸比例
+        # Watershed parameters
+        self.min_flower_size_ratio = 0.35  # Minimum flower size ratio
     
     def process(self, image):
         """
-        处理图像通过简化的分割管线，使用分水岭分割
+        Process image through the segmentation pipeline with smooth edge preservation
         
         Args:
-            image: 输入的RGB图像（NumPy数组）
+            image: Input RGB image (NumPy array)
             
         Returns:
-            segmented_image: 二值图像，带有分割出的花朵（黑色背景）
-            intermediate_results: 中间处理步骤的字典
+            segmented_image: Image with segmented flower and smooth edges
+            intermediate_results: Dictionary of intermediate processing steps
         """
-        # 存储中间结果的字典，用于可视化
+        # Store intermediate results for visualization
         intermediate_results = {}
         
-        # 步骤1: 使用原始图像，不进行缩放
+        # Step 1: Use original image without scaling
         original_image = image.copy()
         intermediate_results["1_original"] = original_image
         
-        # 步骤2: 转换为LAB颜色空间
+        # Step 2: Convert to LAB color space
         lab_image = convert_to_lab(original_image)
         l, a, b = extract_lab_channels(lab_image)
         
-        # 保存LAB通道
+        # Save LAB channels
         intermediate_results["2a_lab_l_channel"] = l
         intermediate_results["2b_lab_a_channel"] = a
         intermediate_results["2c_lab_b_channel"] = b
         
-        # 步骤3: 直方图均衡化增强对比度（基于讲座2）
+        # Step 3: Enhance contrast using histogram equalization
         enhanced_l = cv2.equalizeHist(l)
         intermediate_results["3a_enhanced_l"] = enhanced_l
         
-        # 计算梯度信息（基于讲座6A）
+        # Calculate gradient information
         grad_l = self._calculate_gradient(l)
         grad_a = self._calculate_gradient(a)
         grad_b = self._calculate_gradient(b)
         
-        # 合并梯度信息
+        # Combine gradient information
         combined_gradient = cv2.addWeighted(grad_l, 0.5, cv2.addWeighted(grad_a, 0.5, grad_b, 0.5, 0), 0.5, 0)
         intermediate_results["3b_combined_gradient"] = combined_gradient
         
-        # 步骤4: 应用滤波器减少噪声（基于讲座3A和3B）
-        # 应用高斯滤波降噪
+        # Step 4: Apply filters for noise reduction
         gaussian_filtered = apply_gaussian_filter(enhanced_l, self.gaussian_kernel)
         intermediate_results["4a_gaussian_filtered"] = gaussian_filtered
         
-        # 应用双边滤波保持边缘
         bilateral_filtered = apply_bilateral_filter(
             gaussian_filtered, 
             d=self.bilateral_d, 
@@ -88,8 +88,7 @@ class FlowerSegmentationPipeline:
         )
         intermediate_results["4b_bilateral_filtered"] = bilateral_filtered
         
-        # 步骤5: 多层次阈值处理（基于讲座4）
-        # 自适应阈值
+        # Step 5: Multi-level thresholding
         adaptive_thresh = adaptive_threshold(
             bilateral_filtered, 
             block_size=self.adaptive_block_size, 
@@ -97,106 +96,117 @@ class FlowerSegmentationPipeline:
         )
         intermediate_results["5a_adaptive_threshold"] = adaptive_thresh
         
-        # Otsu阈值
         otsu_thresh = otsu_threshold(bilateral_filtered)
         intermediate_results["5b_otsu_threshold"] = otsu_thresh
         
-        # 多层次阈值
         multi_thresh = multi_level_threshold(bilateral_filtered, num_classes=3)
         multi_thresh_binary = cv2.threshold(multi_thresh, 127, 255, cv2.THRESH_BINARY)[1]
         intermediate_results["5c_multi_threshold"] = multi_thresh_binary
         
-        # 结合不同阈值结果
+        # Combine threshold results
         combined_thresh = cv2.bitwise_or(
             adaptive_thresh, 
             cv2.bitwise_or(otsu_thresh, multi_thresh_binary)
         )
         intermediate_results["5d_combined_threshold"] = combined_thresh
         
-        # 步骤6: 应用分水岭分割（基于讲座7）
+        # Step 6: Apply watershed segmentation
         watershed_mask = self._apply_watershed_segmentation(original_image, combined_thresh)
         intermediate_results["6a_watershed_segmentation"] = watershed_mask
         
-        # 填充孔洞（简单的后处理）
+        # Fill holes
         filled_mask = fill_holes(watershed_mask)
         intermediate_results["6b_filled_holes"] = filled_mask
         
-        # 找到最大连通区域以移除小的噪声区域
+        # Extract largest component
         largest_component = self._extract_largest_component(filled_mask)
         intermediate_results["6c_largest_component"] = largest_component
         
-        # 使用分水岭掩码直接获取最终的分割结果
-        segmented_flower = cv2.bitwise_and(
-            original_image, original_image, mask=largest_component
-        )
-        intermediate_results["7_final_segmented"] = segmented_flower
+        # Step 7: Create feathered edges for smooth transitions
+        feathered_mask = self._create_feathered_mask(largest_component)
+        intermediate_results["7a_feathered_mask"] = feathered_mask
         
-        # 返回最终的分割图像和所有中间结果
+        # Step 8: Apply the feathered mask to the original image
+        # Instead of a binary segmentation, use the feathered mask for a gradual transition
+        # Create a 3-channel mask by duplicating the feathered mask for RGB
+        h, w = feathered_mask.shape[:2]
+        alpha_mask = np.zeros((h, w, 3), dtype=np.float32)
+        alpha_mask[:, :, 0] = feathered_mask / 255.0
+        alpha_mask[:, :, 1] = feathered_mask / 255.0
+        alpha_mask[:, :, 2] = feathered_mask / 255.0
+        
+        # Apply the alpha mask to create the final segmented image with smooth edges
+        segmented_flower = np.zeros_like(original_image)
+        for c in range(3):
+            segmented_flower[:, :, c] = original_image[:, :, c] * alpha_mask[:, :, c]
+        
+        intermediate_results["8_final_segmented"] = segmented_flower
+        
         return segmented_flower, intermediate_results
     
     def _calculate_gradient(self, image):
-        """计算图像梯度并返回标准化的梯度幅值"""
-        # 使用Sobel算子计算梯度
+        """Calculate image gradient and return normalized gradient magnitude"""
+        # Use Sobel operator to calculate gradient
         sobelx = cv2.Sobel(image, cv2.CV_64F, 1, 0, ksize=3)
         sobely = cv2.Sobel(image, cv2.CV_64F, 0, 1, ksize=3)
         
-        # 计算梯度幅值
+        # Calculate gradient magnitude
         magnitude = cv2.magnitude(sobelx, sobely)
         
-        # 标准化到0-255范围
+        # Normalize to 0-255 range
         normalized = cv2.normalize(magnitude, None, 0, 255, cv2.NORM_MINMAX)
         
         return normalized.astype(np.uint8)
     
     def _apply_watershed_segmentation(self, image, binary_mask):
-        """应用分水岭算法进行分割"""
-        # 确保二值掩码
+        """Apply watershed algorithm for segmentation"""
+        # Ensure binary mask
         _, sure_fg = cv2.threshold(binary_mask, 127, 255, cv2.THRESH_BINARY)
         
-        # 通过距离变换查找确定的前景区域
+        # Find sure foreground regions using distance transform
         dist_transform = cv2.distanceTransform(sure_fg, cv2.DIST_L2, 5)
         _, sure_fg = cv2.threshold(dist_transform, 0.5*dist_transform.max(), 255, 0)
         sure_fg = sure_fg.astype(np.uint8)
         
-        # 查找确定的背景区域
+        # Find sure background regions
         sure_bg = cv2.dilate(binary_mask, np.ones((3,3), np.uint8), iterations=3)
         
-        # 计算未知区域
+        # Calculate unknown region
         unknown = cv2.subtract(sure_bg, sure_fg)
         
-        # 标记
+        # Label markers
         _, markers = cv2.connectedComponents(sure_fg)
         
-        # 添加1到所有标签，这样确保背景不是0
+        # Add 1 to all labels so background isn't 0
         markers = markers + 1
         
-        # 将未知区域标记为0
+        # Mark unknown region as 0
         markers[unknown == 255] = 0
         
-        # 应用分水岭算法
+        # Apply watershed algorithm
         color_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB) if len(image.shape) == 2 else image
         markers = cv2.watershed(color_image, markers.astype(np.int32))
         
-        # 创建分水岭结果的掩码
+        # Create watershed result mask
         watershed_mask = np.zeros_like(binary_mask)
         watershed_mask[markers > 1] = 255
         
         return watershed_mask
     
     def _extract_largest_component(self, binary_mask):
-        """提取二值掩码中最大的连通区域"""
-        # 进行连通组件分析
+        """Extract the largest connected component from binary mask"""
+        # Perform connected component analysis
         num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(
             binary_mask, connectivity=8
         )
         
-        # 跳过背景（标签0）
+        # Skip background (label 0)
         if num_labels > 1:
-            # 按面积找到最大的组件（不包括背景）
+            # Find largest component by area (excluding background)
             max_area = 0
             max_label = 0
             
-            # 图像总像素数
+            # Total image pixels
             total_pixels = binary_mask.shape[0] * binary_mask.shape[1]
             min_area = total_pixels * self.min_flower_size_ratio
             
@@ -206,15 +216,54 @@ class FlowerSegmentationPipeline:
                     max_area = area
                     max_label = i
             
-            # 提取最大的组件
+            # Extract largest component
             largest_component = np.zeros_like(binary_mask)
-            if max_label > 0:  # 确保找到了一个符合条件的组件
+            if max_label > 0:  # Ensure a component was found
                 largest_component[labels == max_label] = 255
             else:
-                # 如果没有找到足够大的组件，使用原始掩码
+                # If no component found, use original mask
                 largest_component = binary_mask
         else:
-            # 如果没有找到组件，使用原始掩码
+            # If no components found, use original mask
             largest_component = binary_mask
             
         return largest_component
+    
+    def _create_feathered_mask(self, binary_mask):
+        """
+        Create a feathered mask with smooth edges for natural-looking segmentation
+        
+        Args:
+            binary_mask: Binary mask of the object
+            
+        Returns:
+            Feathered mask with smooth transitions at edges
+        """
+        # First, apply a slight dilation to ensure we capture all of the flower
+        kernel = np.ones((3, 3), np.uint8)
+        dilated_mask = cv2.dilate(binary_mask, kernel, iterations=1)
+        
+        # Apply distance transform to find distances to the nearest background pixel
+        dist_transform = cv2.distanceTransform(dilated_mask, cv2.DIST_L2, 3)
+        
+        # Normalize the distance transform to 0-255 range
+        dist_norm = cv2.normalize(dist_transform, None, 0, 255, cv2.NORM_MINMAX)
+        dist_norm = dist_norm.astype(np.uint8)
+        
+        # Apply Gaussian blur to create feathering effect
+        feathered_mask = cv2.GaussianBlur(dist_norm, (self.edge_blur_size, self.edge_blur_size), 0)
+        
+        # Create a gradient transition at the edges using the feather_amount parameter
+        _, binary_feathered = cv2.threshold(feathered_mask, 1, 255, cv2.THRESH_BINARY)
+        
+        # Dilate the binary mask to define the feathering region
+        feather_region = cv2.dilate(binary_feathered, 
+                                   np.ones((self.feather_amount*2+1, self.feather_amount*2+1), np.uint8), 
+                                   iterations=1)
+        feather_region = cv2.subtract(feather_region, binary_feathered)
+        
+        # Apply the feathered mask
+        result = binary_feathered.copy()
+        result[feather_region > 0] = feathered_mask[feather_region > 0]
+        
+        return result
