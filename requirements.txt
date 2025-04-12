@@ -1,11 +1,8 @@
-opencv-python
 numpy
-matplotlib
-scikit-learn
+opencv-python
 scikit-image
+scikit-learn
+matplotlib
+pandas
 torch
 torchvision
-transformers
-tqdm
-pandas
-Pillow
