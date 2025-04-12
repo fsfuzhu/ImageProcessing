@@ -20,8 +20,7 @@ class FlowerSegmentationPipeline:
     
     def __init__(self):
         """初始化分割管线，使用通用参数"""
-        # 基础参数
-        self.resize_dim = (500, 500)  # 调整大小以保持一致的处理
+        # 不再使用固定的resize_dim，保持原始图像尺寸
         
         # 增强和滤波参数
         self.gaussian_kernel = (3, 3)  # 高斯滤波核大小
@@ -33,7 +32,7 @@ class FlowerSegmentationPipeline:
         self.adaptive_c = 2  # 自适应阈值常数
         
         # 分水岭参数
-        self.min_flower_size_ratio = 0.09  # 最小花朵尺寸比例
+        self.min_flower_size_ratio = 1  # 最小花朵尺寸比例
     
     def process(self, image):
         """
@@ -49,12 +48,12 @@ class FlowerSegmentationPipeline:
         # 存储中间结果的字典，用于可视化
         intermediate_results = {}
         
-        # 步骤1: 调整图像大小以保持一致处理
-        resized_image = cv2.resize(image, self.resize_dim, interpolation=cv2.INTER_AREA)
-        intermediate_results["1_original_resized"] = resized_image.copy()
+        # 步骤1: 使用原始图像，不进行缩放
+        original_image = image.copy()
+        intermediate_results["1_original"] = original_image
         
         # 步骤2: 转换为LAB颜色空间
-        lab_image = convert_to_lab(resized_image)
+        lab_image = convert_to_lab(original_image)
         l, a, b = extract_lab_channels(lab_image)
         
         # 保存LAB通道
@@ -115,7 +114,7 @@ class FlowerSegmentationPipeline:
         intermediate_results["5d_combined_threshold"] = combined_thresh
         
         # 步骤6: 应用分水岭分割（基于讲座7）
-        watershed_mask = self._apply_watershed_segmentation(resized_image, combined_thresh)
+        watershed_mask = self._apply_watershed_segmentation(original_image, combined_thresh)
         intermediate_results["6a_watershed_segmentation"] = watershed_mask
         
         # 填充孔洞（简单的后处理）
@@ -128,7 +127,7 @@ class FlowerSegmentationPipeline:
         
         # 使用分水岭掩码直接获取最终的分割结果
         segmented_flower = cv2.bitwise_and(
-            resized_image, resized_image, mask=largest_component
+            original_image, original_image, mask=largest_component
         )
         intermediate_results["7_final_segmented"] = segmented_flower
         
