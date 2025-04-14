@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
-COMP2032 Coursework - 花朵分割评估模块
-使用ground truth中的红色遮罩评估分割结果
+COMP2032 Coursework - Flower Segmentation Evaluation Module
+Evaluates segmentation results using red masks from ground truth images
 """
 
 import os
@@ -16,92 +16,92 @@ from pathlib import Path
 
 def extract_red_mask(image_path):
     """
-    从ground truth图像中提取红色遮罩
+    Extract red mask from ground truth image
     
     Args:
-        image_path: ground truth图像路径
+        image_path: Path to ground truth image
         
     Returns:
-        红色区域的二值遮罩 (255表示红色区域, 0表示背景)
+        Binary mask where red regions are 255, background is 0
     """
-    # 读取图像
+    # Read image
     image = cv2.imread(image_path)
     if image is None:
-        print(f"错误: 无法读取图像 {image_path}")
+        print(f"Error: Cannot read image {image_path}")
         return None
     
-    # 转换到HSV颜色空间, 更容易分离颜色
+    # Convert to HSV color space for easier color separation
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     
-    # 定义HSV空间中红色的范围
-    # 红色在HSV中有两个范围 (0-10和170-180)
+    # Define HSV ranges for red color
+    # Red has two ranges in HSV (0-10 and 170-180)
     lower_red1 = np.array([0, 120, 70])
     upper_red1 = np.array([10, 255, 255])
     lower_red2 = np.array([170, 120, 70])
     upper_red2 = np.array([180, 255, 255])
     
-    # 创建两个红色范围的掩码
+    # Create masks for both red ranges
     mask1 = cv2.inRange(hsv, lower_red1, upper_red1)
     mask2 = cv2.inRange(hsv, lower_red2, upper_red2)
     
-    # 合并掩码
+    # Combine masks
     red_mask = cv2.bitwise_or(mask1, mask2)
     
     return red_mask
 
 def apply_mask_to_original(original_image_path, mask):
     """
-    将mask应用到原始图像上，保留花朵，背景变黑
+    Apply mask to original image, keeping the flower and making background black
     
     Args:
-        original_image_path: 原始图像路径
-        mask: 二值掩码
+        original_image_path: Path to original image
+        mask: Binary mask
         
     Returns:
-        处理后的图像，花朵前景保留，背景变黑
+        Processed image with flower foreground and black background
     """
-    # 读取原始图像
+    # Read original image
     original = cv2.imread(original_image_path)
     if original is None:
-        print(f"错误: 无法读取原始图像 {original_image_path}")
+        print(f"Error: Cannot read original image {original_image_path}")
         return None
     
-    # 确保掩码是二值的
+    # Ensure mask is binary
     _, binary_mask = cv2.threshold(mask, 1, 255, cv2.THRESH_BINARY)
     
-    # 如果原始图像和掩码大小不同，调整掩码大小
+    # Resize mask if original and mask have different dimensions
     if original.shape[:2] != binary_mask.shape[:2]:
         binary_mask = cv2.resize(binary_mask, (original.shape[1], original.shape[0]), 
                                 interpolation=cv2.INTER_NEAREST)
     
-    # 创建3通道掩码
+    # Create 3-channel mask
     mask_3ch = cv2.cvtColor(binary_mask, cv2.COLOR_GRAY2BGR)
     
-    # 应用掩码到原始图像
+    # Apply mask to original image
     result = cv2.bitwise_and(original, mask_3ch)
     
     return result
 
 def calculate_iou(predicted_mask, ground_truth_mask):
     """
-    计算IoU (Intersection over Union)
+    Calculate IoU (Intersection over Union)
     
     Args:
-        predicted_mask: 预测的二值掩码
-        ground_truth_mask: ground truth二值掩码
+        predicted_mask: Predicted binary mask
+        ground_truth_mask: Ground truth binary mask
         
     Returns:
-        IoU值 (0-1之间的浮点数)
+        IoU value (float between 0-1)
     """
-    # 确保掩码是二值的
+    # Ensure masks are binary
     _, pred_binary = cv2.threshold(predicted_mask, 1, 1, cv2.THRESH_BINARY)
     _, gt_binary = cv2.threshold(ground_truth_mask, 1, 1, cv2.THRESH_BINARY)
     
-    # 计算交集和并集
+    # Calculate intersection and union
     intersection = np.logical_and(pred_binary, gt_binary).sum()
     union = np.logical_or(pred_binary, gt_binary).sum()
     
-    # 避免除零错误
+    # Avoid division by zero
     if union == 0:
         return 0.0
     
@@ -109,67 +109,67 @@ def calculate_iou(predicted_mask, ground_truth_mask):
 
 def calculate_dice_coefficient(predicted_mask, ground_truth_mask):
     """
-    计算Dice系数 (F1分数)
+    Calculate Dice coefficient (F1 score)
     
     Args:
-        predicted_mask: 预测的二值掩码
-        ground_truth_mask: ground truth二值掩码
+        predicted_mask: Predicted binary mask
+        ground_truth_mask: Ground truth binary mask
         
     Returns:
-        Dice系数 (0-1之间的浮点数)
+        Dice coefficient (float between 0-1)
     """
-    # 确保掩码是二值的
+    # Ensure masks are binary
     _, pred_binary = cv2.threshold(predicted_mask, 1, 1, cv2.THRESH_BINARY)
     _, gt_binary = cv2.threshold(ground_truth_mask, 1, 1, cv2.THRESH_BINARY)
     
-    # 计算交集
+    # Calculate intersection
     intersection = np.logical_and(pred_binary, gt_binary).sum()
     
-    # 计算两个掩码的大小
+    # Calculate sizes of both masks
     size_pred = pred_binary.sum()
     size_gt = gt_binary.sum()
     
-    # 避免除零错误
+    # Avoid division by zero
     if size_pred + size_gt == 0:
         return 0.0
     
-    # 计算Dice系数
+    # Calculate Dice coefficient
     return 2 * intersection / (size_pred + size_gt)
 
 def evaluate_segmentation_with_red_mask(input_dir, segmented_dir, ground_truth_dir, difficulty_levels=None, output_dir=None):
     """
-    使用ground truth中的红色遮罩评估分割结果
+    Evaluate segmentation results using red masks from ground truth images
     
     Args:
-        input_dir: 原始输入图像目录
-        segmented_dir: 分割结果目录
-        ground_truth_dir: ground truth目录
-        difficulty_levels: 难度级别列表 (例如 ['easy', 'medium', 'hard'])
-        output_dir: 输出评估结果的目录
+        input_dir: Directory with original input images
+        segmented_dir: Directory with segmentation results
+        ground_truth_dir: Directory with ground truth images
+        difficulty_levels: List of difficulty levels (e.g. ['easy', 'medium', 'hard'])
+        output_dir: Directory to save evaluation results
         
     Returns:
-        评估指标的字典
+        Dictionary of evaluation metrics
     """
-    # 如果没有指定难度级别，默认处理所有图像
+    # If no difficulty levels specified, process all images as default
     if difficulty_levels is None:
         difficulty_levels = [""]
     
-    # 确保输出目录存在
+    # Ensure output directory exists
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
     
-    # 初始化结果列表和累计指标
+    # Initialize results list and cumulative metrics
     all_results = []
     total_iou = 0
     total_accuracy = 0
     total_dice = 0
     total_images = 0
     
-    print("评估分割结果:")
+    print("Evaluating segmentation results:")
     
-    # 处理每个难度级别
+    # Process each difficulty level
     for level in difficulty_levels:
-        # 构建对应难度级别的目录路径
+        # Build directory paths for the current difficulty level
         level_input_dir = os.path.join(input_dir, level) if level else input_dir
         level_segmented_dir = os.path.join(segmented_dir, level) if level else segmented_dir
         level_gt_dir = os.path.join(ground_truth_dir, level) if level else ground_truth_dir
@@ -178,19 +178,19 @@ def evaluate_segmentation_with_red_mask(input_dir, segmented_dir, ground_truth_d
             level_output_dir = os.path.join(output_dir, level) if level else output_dir
             os.makedirs(level_output_dir, exist_ok=True)
         
-        # 查找所有分割结果
+        # Find all segmentation results
         segmented_paths = glob.glob(os.path.join(level_segmented_dir, "*.jpg")) + \
                           glob.glob(os.path.join(level_segmented_dir, "*.png"))
         
-        print(f"处理 {len(segmented_paths)} 张图像，难度级别: {level or '默认'}")
+        print(f"Processing {len(segmented_paths)} images, difficulty level: {level or 'default'}")
         
-        # 处理每张图像
+        # Process each image
         for seg_path in segmented_paths:
-            # 获取图像文件名
+            # Get image filename
             img_filename = os.path.basename(seg_path)
             base_name = os.path.splitext(img_filename)[0]
             
-            # 查找对应的ground truth文件
+            # Find corresponding ground truth file
             possible_gt_paths = [
                 os.path.join(level_gt_dir, f"{base_name}.png"),
                 os.path.join(level_gt_dir, f"{base_name}.jpg")
@@ -202,12 +202,12 @@ def evaluate_segmentation_with_red_mask(input_dir, segmented_dir, ground_truth_d
                     gt_path = path
                     break
             
-            # 跳过找不到ground truth的图像
+            # Skip if ground truth not found
             if gt_path is None:
-                print(f"  警告: 找不到 {img_filename} 的ground truth")
+                print(f"  Warning: Ground truth not found for {img_filename}")
                 continue
                 
-            # 查找对应的原始输入图像
+            # Find corresponding original input image
             possible_input_paths = [
                 os.path.join(level_input_dir, f"{base_name}.png"),
                 os.path.join(level_input_dir, f"{base_name}.jpg")
@@ -219,50 +219,50 @@ def evaluate_segmentation_with_red_mask(input_dir, segmented_dir, ground_truth_d
                     input_path = path
                     break
             
-            # 跳过找不到原始图像的情况
+            # Skip if original image not found
             if input_path is None:
-                print(f"  警告: 找不到 {img_filename} 的原始输入图像")
+                print(f"  Warning: Original input image not found for {img_filename}")
                 continue
             
-            print(f"  处理 {img_filename}...")
+            print(f"  Processing {img_filename}...")
             
             try:
-                # 1. 从ground truth中提取红色遮罩
+                # 1. Extract red mask from ground truth
                 red_mask = extract_red_mask(gt_path)
                 if red_mask is None:
                     continue
                 
-                # 2. 读取分割结果
+                # 2. Read segmentation result
                 segmented = cv2.imread(seg_path, cv2.IMREAD_GRAYSCALE)
                 if segmented is None:
-                    print(f"  错误: 无法读取分割结果 {seg_path}")
+                    print(f"  Error: Cannot read segmentation result {seg_path}")
                     continue
                 
-                # 3. 将红色遮罩应用到原始图像上，获取ground truth花朵
+                # 3. Apply red mask to original image to get ground truth flower
                 ground_truth_flower = apply_mask_to_original(input_path, red_mask)
                 if ground_truth_flower is None:
                     continue
                 
-                # 4. 确保分割结果和ground truth大小相同
+                # 4. Ensure segmentation result and ground truth have same dimensions
                 if segmented.shape != red_mask.shape:
                     segmented = cv2.resize(segmented, (red_mask.shape[1], red_mask.shape[0]), 
                                          interpolation=cv2.INTER_NEAREST)
                 
-                # 5. 将分割结果二值化
+                # 5. Binarize segmentation result
                 _, binary_segmented = cv2.threshold(segmented, 1, 255, cv2.THRESH_BINARY)
                 
-                # 6. 计算评估指标
+                # 6. Calculate evaluation metrics
                 iou = calculate_iou(binary_segmented, red_mask)
                 
-                # 计算准确率
+                # Calculate accuracy
                 binary_segmented_flat = (binary_segmented > 0).flatten()
                 red_mask_flat = (red_mask > 0).flatten()
                 accuracy = accuracy_score(red_mask_flat, binary_segmented_flat)
                 
-                # 计算Dice系数
+                # Calculate Dice coefficient
                 dice = calculate_dice_coefficient(binary_segmented, red_mask)
                 
-                # 7. 添加到结果列表
+                # 7. Add to results list
                 result = {
                     'image': img_filename,
                     'difficulty': level or 'default',
@@ -272,7 +272,7 @@ def evaluate_segmentation_with_red_mask(input_dir, segmented_dir, ground_truth_d
                 }
                 all_results.append(result)
                 
-                # 8. 累计指标
+                # 8. Accumulate metrics
                 total_iou += iou
                 total_accuracy += accuracy
                 total_dice += dice
@@ -280,27 +280,27 @@ def evaluate_segmentation_with_red_mask(input_dir, segmented_dir, ground_truth_d
                 
                 print(f"  {img_filename}: IoU = {iou:.4f}, Accuracy = {accuracy:.4f}, Dice = {dice:.4f}")
                 
-                # 9. 如果指定了输出目录，保存可视化结果
+                # 9. Save visualization if output directory specified
                 if output_dir:
-                    # 创建可视化比较
+                    # Create visualization comparison
                     vis_path = os.path.join(level_output_dir, f"{base_name}_comparison.png")
                     
-                    # 原始图像
+                    # Original image
                     original = cv2.imread(input_path)
                     
-                    # 分割结果应用到原始图像
+                    # Segmentation result
                     segmented_color = cv2.imread(seg_path)
                     
-                    # 创建可视化图像
-                    # 确保所有图像具有相同的大小
+                    # Create visualization image
+                    # Ensure all images have the same size
                     h, w = original.shape[:2]
                     segmented_resized = cv2.resize(segmented_color, (w, h))
                     ground_truth_resized = cv2.resize(ground_truth_flower, (w, h))
                     
-                    # 水平拼接原始图像、分割结果和ground truth
+                    # Horizontally stack original, segmentation result, and ground truth
                     comparison = np.hstack((original, segmented_resized, ground_truth_resized))
                     
-                    # 添加文本标签
+                    # Add text labels
                     font = cv2.FONT_HERSHEY_SIMPLEX
                     y_pos = 30
                     cv2.putText(comparison, "Original", (10, y_pos), font, 1, (255, 255, 255), 2)
@@ -308,13 +308,13 @@ def evaluate_segmentation_with_red_mask(input_dir, segmented_dir, ground_truth_d
                     cv2.putText(comparison, "Ground Truth", (2*w + 10, y_pos), font, 1, (255, 255, 255), 2)
                     cv2.putText(comparison, f"IoU: {iou:.4f}", (10, h - 10), font, 0.7, (255, 255, 255), 2)
                     
-                    # 保存比较图像
+                    # Save comparison image
                     cv2.imwrite(vis_path, comparison)
                 
             except Exception as e:
-                print(f"  处理 {img_filename} 时出错: {e}")
+                print(f"  Error processing {img_filename}: {e}")
     
-    # 计算平均指标
+    # Calculate average metrics
     avg_metrics = {}
     if total_images > 0:
         avg_metrics['avg_iou'] = total_iou / total_images
@@ -322,32 +322,32 @@ def evaluate_segmentation_with_red_mask(input_dir, segmented_dir, ground_truth_d
         avg_metrics['avg_dice'] = total_dice / total_images
         avg_metrics['total_images'] = total_images
         
-        print(f"\n评估完成，处理了 {total_images} 张图像")
-        print(f"平均 IoU: {avg_metrics['avg_iou']:.4f}")
-        print(f"平均准确率: {avg_metrics['avg_accuracy']:.4f}")
-        print(f"平均 Dice 系数: {avg_metrics['avg_dice']:.4f}")
+        print(f"\nEvaluation complete, processed {total_images} images")
+        print(f"Average IoU: {avg_metrics['avg_iou']:.4f}")
+        print(f"Average Accuracy: {avg_metrics['avg_accuracy']:.4f}")
+        print(f"Average Dice Coefficient: {avg_metrics['avg_dice']:.4f}")
     
-    # 如果指定了输出目录，保存评估结果
+    # Save evaluation results if output directory specified
     if output_dir and all_results:
-        # 保存为CSV
+        # Save as CSV
         results_df = pd.DataFrame(all_results)
         csv_path = os.path.join(output_dir, "segmentation_evaluation.csv")
         results_df.to_csv(csv_path, index=False)
         
-        # 保存总结报告
+        # Save summary report
         summary_path = os.path.join(output_dir, "evaluation_summary.txt")
         with open(summary_path, 'w') as f:
-            f.write("花朵分割评估结果\n")
-            f.write("====================\n\n")
-            f.write(f"评估的图像数量: {total_images}\n\n")
-            f.write("平均指标:\n")
+            f.write("Flower Segmentation Evaluation Results\n")
+            f.write("==================================\n\n")
+            f.write(f"Number of images evaluated: {total_images}\n\n")
+            f.write("Average metrics:\n")
             f.write(f"- IoU: {avg_metrics['avg_iou']:.4f}\n")
-            f.write(f"- 准确率: {avg_metrics['avg_accuracy']:.4f}\n")
-            f.write(f"- Dice系数: {avg_metrics['avg_dice']:.4f}\n\n")
+            f.write(f"- Accuracy: {avg_metrics['avg_accuracy']:.4f}\n")
+            f.write(f"- Dice Coefficient: {avg_metrics['avg_dice']:.4f}\n\n")
             
-            # 按难度级别分组
+            # Group by difficulty level
             if len(difficulty_levels) > 1:
-                f.write("按难度级别的平均指标:\n")
+                f.write("Metrics by difficulty level:\n")
                 for level in difficulty_levels:
                     level_results = [r for r in all_results if r['difficulty'] == (level or 'default')]
                     if level_results:
@@ -355,11 +355,11 @@ def evaluate_segmentation_with_red_mask(input_dir, segmented_dir, ground_truth_d
                         level_acc = sum(r['accuracy'] for r in level_results) / len(level_results)
                         level_dice = sum(r['dice'] for r in level_results) / len(level_results)
                         
-                        f.write(f"\n{level or '默认'} 级别 ({len(level_results)}张图像):\n")
+                        f.write(f"\n{level or 'default'} level ({len(level_results)} images):\n")
                         f.write(f"- IoU: {level_iou:.4f}\n")
-                        f.write(f"- 准确率: {level_acc:.4f}\n")
-                        f.write(f"- Dice系数: {level_dice:.4f}\n")
+                        f.write(f"- Accuracy: {level_acc:.4f}\n")
+                        f.write(f"- Dice Coefficient: {level_dice:.4f}\n")
         
-        print(f"评估结果已保存到 {output_dir}")
+        print(f"Evaluation results saved to {output_dir}")
     
     return avg_metrics
