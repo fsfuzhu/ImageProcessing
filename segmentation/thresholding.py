@@ -2,9 +2,9 @@
 # -*- coding: utf-8 -*-
 
 """
-COMP2032 Coursework - 通用版本
-阈值处理实现
-基于讲座4 - 阈值处理和二值图像
+COMP2032 Coursework - General Version
+Thresholding Implementations
+Based on Lecture 4 - Thresholding and Binary Images
 """
 
 import cv2
@@ -13,57 +13,57 @@ from skimage import filters
 
 def simple_threshold(image, threshold=127):
     """
-    应用简单的全局阈值
+    Apply simple global thresholding
     
-    如讲座4中所述，这是最基本的阈值处理方法，
-    其中高于固定阈值的像素被视为前景。
+    As discussed in Lecture 4, this is the most basic form where pixels
+    above a fixed threshold are considered foreground.
     
     Args:
-        image: 灰度输入图像
-        threshold: 阈值（0-255）
+        image: Grayscale input image
+        threshold: Threshold value (0-255)
         
     Returns:
-        二值图像
+        Binary image
     """
     _, binary = cv2.threshold(image, threshold, 255, cv2.THRESH_BINARY)
     return binary
 
 def otsu_threshold(image):
     """
-    应用Otsu的自动阈值处理
+    Apply Otsu's automatic thresholding
     
-    Otsu的方法通过最小化前景和背景之间的类内方差，
-    自动确定最佳阈值。
+    Otsu's method automatically determines an optimal threshold value
+    by minimizing the intra-class variance between foreground and background.
     
     Args:
-        image: 灰度输入图像
+        image: Grayscale input image
         
     Returns:
-        二值图像
+        Binary image
     """
     _, binary = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     return binary
 
 def adaptive_threshold(image, block_size=15, c=3):
     """
-    应用自适应阈值处理
+    Apply adaptive thresholding
     
-    自适应阈值处理计算图像不同区域的不同阈值，
-    使其对光照变化更为稳健。
+    Adaptive thresholding calculates different thresholds for different regions
+    of the image, making it more robust to varying illumination.
     
     Args:
-        image: 灰度输入图像
-        block_size: 像素邻域的大小（必须是奇数）
-        c: 从均值中减去的常数
+        image: Grayscale input image
+        block_size: Size of the pixel neighborhood (must be odd)
+        c: Constant subtracted from the mean
         
     Returns:
-        二值图像
+        Binary image
     """
-    # 确保图像是8位灰度图
+    # Ensure image is 8-bit grayscale
     if image.dtype != np.uint8:
         image = np.clip(image, 0, 255).astype(np.uint8)
     
-    # 确保block_size为奇数且至少为3
+    # Ensure block_size is odd and >= 3
     block_size = max(3, block_size)
     if block_size % 2 == 0:
         block_size += 1
@@ -75,32 +75,33 @@ def adaptive_threshold(image, block_size=15, c=3):
 
 def rosin_threshold(image):
     """
-    应用Rosin的单峰阈值处理
+    Apply Rosin's unimodal thresholding
     
-    如讲座4中所述，Rosin的方法对于没有明显双峰分布的单峰直方图很有效。
+    As discussed in Lecture 4, Rosin's method is effective for unimodal histograms
+    where a clear bimodal distribution is not present.
     
     Args:
-        image: 灰度输入图像
+        image: Grayscale input image
         
     Returns:
-        二值图像
+        Binary image
     """
-    # 计算直方图
+    # Calculate histogram
     hist, bins = np.histogram(image.flatten(), bins=256, range=[0, 256])
     
-    # 找到直方图的峰值
+    # Find the peak of the histogram
     peak_idx = np.argmax(hist)
     
-    # 找到最后一个非零bin
+    # Find the last non-zero bin
     last_idx = 255
     while hist[last_idx] == 0 and last_idx > peak_idx:
         last_idx -= 1
     
-    # 计算从峰值到最后bin的线
+    # Calculate the line from the peak to the last bin
     x1, y1 = peak_idx, hist[peak_idx]
     x2, y2 = last_idx, hist[last_idx]
     
-    # 计算每个点到线的垂直距离
+    # Calculate the perpendicular distance from each point to the line
     max_dist = 0
     threshold = peak_idx
     
@@ -108,8 +109,8 @@ def rosin_threshold(image):
         if hist[i] == 0:
             continue
         
-        # 计算垂直距离
-        # 线方程：ax + by + c = 0
+        # Calculate perpendicular distance
+        # Line equation: ax + by + c = 0
         a = y2 - y1
         b = x1 - x2
         c = x2 * y1 - x1 * y2
@@ -120,36 +121,36 @@ def rosin_threshold(image):
             max_dist = dist
             threshold = i
     
-    # 应用计算出的阈值
+    # Apply the calculated threshold
     _, binary = cv2.threshold(image, threshold, 255, cv2.THRESH_BINARY)
     return binary
 
 def multi_level_threshold(image, num_classes=3):
     """
-    应用多级阈值处理，用于更复杂的图像
+    Apply multi-level thresholding for more complex images
     
-    这超出了简单的二值阈值处理，可以分离多个类
-    （例如，背景、花瓣、花的中心）。
+    This goes beyond simple binary thresholding and can separate multiple classes
+    (e.g., background, flower petals, flower center).
     
     Args:
-        image: 灰度输入图像
-        num_classes: 要分离的类别数
+        image: Grayscale input image
+        num_classes: Number of classes to separate
         
     Returns:
-        多级阈值处理后的图像
+        Multi-level thresholded image
     """
     try:
-        # 使用scikit-image的多级Otsu实现
+        # Use scikit-image's multi-Otsu implementation
         thresholds = filters.threshold_multiotsu(image, classes=num_classes)
         
-        # 创建结果图像
+        # Create the result image
         result = np.digitize(image, bins=thresholds)
         
-        # 缩放结果到0-255范围
+        # Scale result to 0-255 range
         result = (255 * result / (num_classes - 1)).astype(np.uint8)
         
         return result
     except Exception as e:
-        print(f"多级阈值处理失败: {e}")
-        # 回退到Otsu
+        print(f"Multi-level thresholding failed: {e}")
+        # Fallback to Otsu
         return otsu_threshold(image)
