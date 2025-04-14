@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 
 from segmentation.pipeline import FlowerSegmentationPipeline
-from evaluation.metrics import calculate_iou, calculate_all_metrics
+from evaluation.evaluate import evaluate_segmentation_with_red_mask
 
 def ensure_dir(directory):
     """Create directory if it does not exist"""
@@ -102,88 +102,6 @@ def process_images(input_dir, output_dir, pipeline_dir, difficulty_levels=None):
         print(f"Processed {total_images} images in {total_time:.2f} seconds")
         print(f"Average processing time: {avg_time:.2f} seconds/image")
 
-def evaluate_segmentation(segmented_dir, ground_truth_dir, difficulty_levels=None):
-    """
-    Evaluate segmentation results against ground truth
-    
-    Args:
-        segmented_dir: Directory containing segmentation results
-        ground_truth_dir: Directory containing ground truth masks
-        difficulty_levels: List of difficulty levels to process
-    """
-    if difficulty_levels is None:
-        difficulty_levels = [""]
-    
-    total_metrics = {}
-    num_images = 0
-    
-    print("Evaluating segmentation results:")
-    
-    for level in difficulty_levels:
-        level_segmented_dir = os.path.join(segmented_dir, level) if level else segmented_dir
-        level_gt_dir = os.path.join(ground_truth_dir, level) if level else ground_truth_dir
-        
-        # Find all segmentation results
-        segmented_paths = glob.glob(os.path.join(level_segmented_dir, "*.jpg")) + \
-                         glob.glob(os.path.join(level_segmented_dir, "*.png"))
-        
-        for seg_path in segmented_paths:
-            img_filename = os.path.basename(seg_path)
-            # Try finding two possible extensions
-            base_name = os.path.splitext(img_filename)[0]
-            possible_gt_paths = [
-                os.path.join(level_gt_dir, f"{base_name}.png"),
-                os.path.join(level_gt_dir, f"{base_name}.jpg")
-            ]
-            
-            # Try to find the existing ground truth file
-            gt_path = None
-            for path in possible_gt_paths:
-                if os.path.exists(path):
-                    gt_path = path
-                    break
-            
-            # Skip if ground truth is not found
-            if gt_path is None:
-                print(f"  Warning: Ground truth not found for {img_filename}")
-                continue
-            
-            # Read segmentation result and ground truth
-            segmented = cv2.imread(seg_path, cv2.IMREAD_GRAYSCALE)
-            ground_truth = cv2.imread(gt_path, cv2.IMREAD_GRAYSCALE)
-            
-            # Ensure both masks have the same dimensions
-            if segmented.shape != ground_truth.shape:
-                print(f"  Resizing ground truth for {img_filename} from {ground_truth.shape} to {segmented.shape}")
-                ground_truth = cv2.resize(ground_truth, (segmented.shape[1], segmented.shape[0]), 
-                                         interpolation=cv2.INTER_NEAREST)
-            
-            # Ensure binary masks
-            _, segmented = cv2.threshold(segmented, 1, 255, cv2.THRESH_BINARY)
-            _, ground_truth = cv2.threshold(ground_truth, 1, 255, cv2.THRESH_BINARY)
-            
-            # Calculate all metrics
-            metrics = calculate_all_metrics(segmented, ground_truth)
-            
-            # Initialize the overall metrics dictionary
-            if not total_metrics:
-                total_metrics = {k: 0 for k in metrics.keys()}
-            
-            # Accumulate metrics
-            for k, v in metrics.items():
-                total_metrics[k] += v
-            
-            print(f"  {img_filename}: IoU = {metrics['iou']:.4f}, Dice = {metrics['dice']:.4f}")
-            
-            num_images += 1
-    
-    # Print overall results
-    if num_images > 0:
-        print(f"Average metrics over {num_images} images:")
-        for k, v in total_metrics.items():
-            avg_value = v / num_images
-            print(f"Average {k}: {avg_value:.4f}")
-            
 def main():
     """Main function to run the flower segmentation pipeline"""
     parser = argparse.ArgumentParser(description="Flower Segmentation Pipeline")
@@ -197,6 +115,8 @@ def main():
                         help='Directory containing ground truth masks')
     parser.add_argument('--evaluate', action='store_true',
                         help='Evaluate segmentation results against ground truth')
+    parser.add_argument('--evaluate-output', type=str, default='evaluation_output',
+                        help='Directory to save evaluation results')
     
     args = parser.parse_args()
     
@@ -208,7 +128,11 @@ def main():
     
     # Evaluate results if requested
     if args.evaluate:
-        evaluate_segmentation(args.output, args.ground_truth, difficulty_levels)
+        print("Evaluating segmentation using red mask extraction...")
+        evaluate_segmentation_with_red_mask(
+            args.input, args.output, args.ground_truth, 
+            difficulty_levels, args.evaluate_output
+        )
 
 if __name__ == "__main__":
     main()
