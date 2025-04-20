@@ -12,6 +12,7 @@ import numpy as np
 import glob
 import pandas as pd
 from sklearn.metrics import accuracy_score
+from sklearn.metrics.pairwise import cosine_similarity
 from pathlib import Path
 
 def extract_red_mask(image_path):
@@ -135,7 +136,30 @@ def calculate_dice_coefficient(predicted_mask, ground_truth_mask):
     
     # Calculate Dice coefficient
     return 2 * intersection / (size_pred + size_gt)
-
+def compute_cosine_similarity(segmented_image, ground_truth):
+    """
+    Calculate cosine similarity between two images
+    
+    Args:
+        image1: First image as NumPy array
+        image2: Second image as NumPy array
+        
+    Returns:
+        Cosine similarity value (float between 0-1)
+    """
+    # Ensure images have the same shape
+    if segmented_image.shape != ground_truth.shape:
+        segmented_image = cv2.resize(segmented_image, 
+                                    (ground_truth.shape[1], ground_truth.shape[0]))
+    
+    # Flatten images to 1D vectors
+    seg_vector = segmented_image.flatten().astype(np.float32)
+    gt_vector = ground_truth.flatten().astype(np.float32)
+    
+    # Calculate cosine similarity
+    similarity = cosine_similarity([seg_vector], [gt_vector])[0][0]
+    
+    return similarity
 def evaluate_segmentation_with_red_mask(input_dir, segmented_dir, ground_truth_dir, difficulty_levels=None, output_dir=None):
     """
     Evaluate segmentation results using red masks from ground truth images
@@ -163,6 +187,7 @@ def evaluate_segmentation_with_red_mask(input_dir, segmented_dir, ground_truth_d
     total_iou = 0
     total_accuracy = 0
     total_dice = 0
+    total_cosine_sim = 0
     total_images = 0
     
     print("Evaluating segmentation results:")
@@ -261,14 +286,16 @@ def evaluate_segmentation_with_red_mask(input_dir, segmented_dir, ground_truth_d
                 
                 # Calculate Dice coefficient
                 dice = calculate_dice_coefficient(binary_segmented, red_mask)
-                
+                # Calculate cosine similarity
+                cosine_sim = compute_cosine_similarity(binary_segmented, red_mask)
                 # 7. Add to results list
                 result = {
                     'image': img_filename,
                     'difficulty': level or 'default',
                     'iou': iou,
                     'accuracy': accuracy,
-                    'dice': dice
+                    'dice': dice,
+                    'cosine_similarity': cosine_sim  # Add this line
                 }
                 all_results.append(result)
                 
@@ -276,10 +303,10 @@ def evaluate_segmentation_with_red_mask(input_dir, segmented_dir, ground_truth_d
                 total_iou += iou
                 total_accuracy += accuracy
                 total_dice += dice
+                total_cosine_sim += cosine_sim
                 total_images += 1
                 
-                print(f"  {img_filename}: IoU = {iou:.4f}, Accuracy = {accuracy:.4f}, Dice = {dice:.4f}")
-                
+                print(f"  {img_filename}: IoU = {iou:.4f}, Accuracy = {accuracy:.4f}, Dice = {dice:.4f}, Cosine Similarity = {cosine_sim:.4f}")  
                 # 9. Save visualization if output directory specified
                 if output_dir:
                     # Create visualization comparison
@@ -316,16 +343,19 @@ def evaluate_segmentation_with_red_mask(input_dir, segmented_dir, ground_truth_d
     
     # Calculate average metrics
     avg_metrics = {}
+    # In the section where avg_metrics is calculated:
     if total_images > 0:
         avg_metrics['avg_iou'] = total_iou / total_images
         avg_metrics['avg_accuracy'] = total_accuracy / total_images
         avg_metrics['avg_dice'] = total_dice / total_images
+        avg_metrics['avg_cosine_similarity'] = total_cosine_sim / total_images  # Add this line
         avg_metrics['total_images'] = total_images
         
         print(f"\nEvaluation complete, processed {total_images} images")
         print(f"Average IoU: {avg_metrics['avg_iou']:.4f}")
         print(f"Average Accuracy: {avg_metrics['avg_accuracy']:.4f}")
         print(f"Average Dice Coefficient: {avg_metrics['avg_dice']:.4f}")
+        print(f"Average Cosine Similarity: {avg_metrics['avg_cosine_similarity']:.4f}")  
     
     # Save evaluation results if output directory specified
     if output_dir and all_results:
@@ -343,7 +373,8 @@ def evaluate_segmentation_with_red_mask(input_dir, segmented_dir, ground_truth_d
             f.write("Average metrics:\n")
             f.write(f"- IoU: {avg_metrics['avg_iou']:.4f}\n")
             f.write(f"- Accuracy: {avg_metrics['avg_accuracy']:.4f}\n")
-            f.write(f"- Dice Coefficient: {avg_metrics['avg_dice']:.4f}\n\n")
+            f.write(f"- Dice Coefficient: {avg_metrics['avg_dice']:.4f}\n")
+            f.write(f"- Cosine Similarity: {avg_metrics['avg_cosine_similarity']:.4f}\n\n")
             
             # Group by difficulty level
             if len(difficulty_levels) > 1:
@@ -354,11 +385,13 @@ def evaluate_segmentation_with_red_mask(input_dir, segmented_dir, ground_truth_d
                         level_iou = sum(r['iou'] for r in level_results) / len(level_results)
                         level_acc = sum(r['accuracy'] for r in level_results) / len(level_results)
                         level_dice = sum(r['dice'] for r in level_results) / len(level_results)
+                        level_cosine_sim = sum(r['cosine_similarity'] for r in level_results) / len(level_results)
                         
                         f.write(f"\n{level or 'default'} level ({len(level_results)} images):\n")
                         f.write(f"- IoU: {level_iou:.4f}\n")
                         f.write(f"- Accuracy: {level_acc:.4f}\n")
                         f.write(f"- Dice Coefficient: {level_dice:.4f}\n")
+                        f.write(f"- Cosine Similarity: {level_cosine_sim:.4f}\n")
         
         print(f"Evaluation results saved to {output_dir}")
     
