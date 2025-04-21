@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 
 """
-COMP2032 Coursework - Modified Pipeline with Purple Flower and Bokeh Background Detection
-Flower segmentation pipeline with smooth edge preservation and special handling for special cases
+COMP2032 Coursework - Modified Pipeline
+Flower segmentation pipeline with smooth edge preservation
 """
 
 import cv2
@@ -34,325 +34,7 @@ class FlowerSegmentationPipeline:
         self.feather_amount = 12  # Amount of feathering to apply
         
         # Watershed parameters
-        self.min_flower_size_ratio = 0.35  # Minimum flower size ratio
-    
-    def _detect_bokeh_background(self, image):
-        """
-        Detect if the image has a bokeh (blurred) background
-        
-        Args:
-            image: Input RGB image (NumPy array)
-            
-        Returns:
-            Boolean indicating if the image has a bokeh background
-        """
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        h, w = gray.shape[:2]
-        
-        # Divide image into center and edges
-        center_size = min(w, h) // 3
-        center_y, center_x = h // 2, w // 2
-        
-        # Extract center region
-        center_region = gray[center_y-center_size:center_y+center_size,
-                           center_x-center_size:center_x+center_size]
-        
-        # Extract edge regions
-        border_thickness = min(w, h) // 8
-        border_mask = np.ones_like(gray, dtype=bool)
-        border_mask[border_thickness:-border_thickness, border_thickness:-border_thickness] = False
-        border_region = gray[border_mask]
-        
-        # Calculate focus measure (variance of Laplacian)
-        center_focus = cv2.Laplacian(center_region, cv2.CV_64F).var()
-        border_focus = cv2.Laplacian(border_region, cv2.CV_64F).var()
-        
-        # If center is significantly more in focus than borders, it's likely bokeh
-        return center_focus > border_focus * 2 and border_focus < 100
-    
-    def _process_bokeh_flower(self, image):
-        """
-        Special processing for flowers with blurred bokeh backgrounds
-        Uses focus detection to separate sharp foreground from blurred background
-        
-        Args:
-            image: Input RGB image (NumPy array)
-            
-        Returns:
-            binary_mask: Mask isolating the sharp flower from blurred background
-        """
-        # Convert to grayscale for focus detection
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        
-        # Calculate variance of Laplacian as a measure of focus
-        laplacian = cv2.Laplacian(gray, cv2.CV_64F)
-        laplacian_var = np.zeros_like(gray, dtype=np.float32)
-        
-        # Calculate local variance in a sliding window
-        window_size = 15
-        for y in range(window_size//2, gray.shape[0] - window_size//2):
-            for x in range(window_size//2, gray.shape[1] - window_size//2):
-                window = laplacian[y-window_size//2:y+window_size//2+1, 
-                                 x-window_size//2:x+window_size//2+1]
-                laplacian_var[y, x] = window.var()
-        
-        # Normalize variance map
-        laplacian_var = cv2.normalize(laplacian_var, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-        
-        # Blur to smooth out noise
-        laplacian_var = cv2.GaussianBlur(laplacian_var, (15, 15), 0)
-        
-        # Apply OTSU thresholding to separate focused from blurred areas
-        _, focus_mask = cv2.threshold(laplacian_var, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        
-        # Use color information to enhance the mask
-        hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-        
-        # Create masks for purple and yellow (common pansy colors)
-        purple_lower = np.array([125, 40, 40])
-        purple_upper = np.array([160, 255, 255])
-        purple_mask = cv2.inRange(hsv, purple_lower, purple_upper)
-        
-        yellow_lower = np.array([20, 100, 100])
-        yellow_upper = np.array([35, 255, 255])
-        yellow_mask = cv2.inRange(hsv, yellow_lower, yellow_upper)
-        
-        # Also detect light/white parts
-        white_lower = np.array([0, 0, 150])
-        white_upper = np.array([180, 40, 255])
-        white_mask = cv2.inRange(hsv, white_lower, white_upper)
-        
-        # Combine all masks
-        color_mask = cv2.bitwise_or(purple_mask, yellow_mask)
-        color_mask = cv2.bitwise_or(color_mask, white_mask)
-        
-        # Combine focus and color masks
-        combined_mask = cv2.bitwise_or(focus_mask, color_mask)
-        
-        # Clean up the mask
-        kernel = np.ones((5,5), np.uint8)
-        combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_CLOSE, kernel, iterations=2)
-        combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_OPEN, kernel, iterations=1)
-        
-        # Find the largest connected component
-        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(combined_mask)
-        
-        if num_labels > 1:
-            max_area = 0
-            max_label = 0
-            
-            for i in range(1, num_labels):
-                area = stats[i, cv2.CC_STAT_AREA]
-                if area > max_area:
-                    max_area = area
-                    max_label = i
-            
-            final_mask = np.zeros_like(combined_mask)
-            final_mask[labels == max_label] = 255
-        else:
-            final_mask = combined_mask
-        
-        return final_mask
-    
-    def _detect_purple_flower_green_background(self, image):
-        """
-        Detect if the image contains a purple flower with green background
-        
-        Args:
-            image: Input RGB image (NumPy array)
-            
-        Returns:
-            Boolean indicating if this is a purple flower with green background
-        """
-        # Convert to HSV
-        hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-        h, s, v = cv2.split(hsv_image)
-        
-        # Define purple color ranges in HSV
-        purple_lower_1 = np.array([130, 40, 40])  # Lower purple
-        purple_upper_1 = np.array([160, 255, 255])  # Upper purple
-        purple_lower_2 = np.array([270, 40, 40]) // 2  # Violet range
-        purple_upper_2 = np.array([320, 255, 255]) // 2
-        
-        # Create purple mask
-        purple_mask_1 = cv2.inRange(hsv_image, purple_lower_1, purple_upper_1)
-        purple_mask_2 = cv2.inRange(hsv_image, purple_lower_2, purple_upper_2)
-        purple_mask = cv2.bitwise_or(purple_mask_1, purple_mask_2)
-        
-        # Define green color range in HSV
-        green_lower = np.array([35, 40, 40])
-        green_upper = np.array([85, 255, 255])
-        
-        # Create green mask
-        green_mask = cv2.inRange(hsv_image, green_lower, green_upper)
-        
-        # Calculate proportions
-        total_pixels = image.shape[0] * image.shape[1]
-        purple_pixels = np.sum(purple_mask > 0)
-        green_pixels = np.sum(green_mask > 0)
-        
-        purple_ratio = purple_pixels / total_pixels
-        green_ratio = green_pixels / total_pixels
-        
-        # Check if this is a purple flower with green background
-        is_purple_flower = purple_ratio > 0.05 and purple_ratio < 0.4  # Significant purple, but not overwhelming
-        has_green_background = green_ratio > 0.1  # Significant green background
-        
-        return is_purple_flower and has_green_background
-    
-    def _process_purple_flower(self, image):
-        """
-        Special processing for purple flowers with green backgrounds
-        
-        Args:
-            image: Input RGB image (NumPy array)
-            
-        Returns:
-            binary_mask: Mask isolating the purple flower
-        """
-        # Convert to HSV
-        hsv_image = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-        
-        # Define purple color ranges in HSV - broader ranges for better coverage
-        # Range 1: Main purple
-        purple_lower_1 = np.array([125, 40, 30])
-        purple_upper_1 = np.array([165, 255, 255])
-        
-        # Range 2: Pinkish purple
-        purple_lower_2 = np.array([140, 20, 50])
-        purple_upper_2 = np.array([180, 255, 255])
-        
-        # Range 3: Bluish purple
-        purple_lower_3 = np.array([110, 40, 40])
-        purple_upper_3 = np.array([135, 255, 255])
-        
-        # Create masks for each purple range
-        purple_mask_1 = cv2.inRange(hsv_image, purple_lower_1, purple_upper_1)
-        purple_mask_2 = cv2.inRange(hsv_image, purple_lower_2, purple_upper_2)
-        purple_mask_3 = cv2.inRange(hsv_image, purple_lower_3, purple_upper_3)
-        
-        # Combine purple masks
-        purple_mask = cv2.bitwise_or(purple_mask_1, purple_mask_2)
-        purple_mask = cv2.bitwise_or(purple_mask, purple_mask_3)
-        
-        # Yellow center detection for pansy flowers
-        yellow_lower = np.array([20, 100, 100])
-        yellow_upper = np.array([30, 255, 255])
-        yellow_mask = cv2.inRange(hsv_image, yellow_lower, yellow_upper)
-        
-        # Include yellow center if it's surrounded by purple
-        kernel = np.ones((5,5), np.uint8)
-        purple_dilated = cv2.dilate(purple_mask, kernel, iterations=2)
-        yellow_center = cv2.bitwise_and(yellow_mask, yellow_mask, mask=purple_dilated)
-        
-        # Combine purple and yellow center
-        combined_mask = cv2.bitwise_or(purple_mask, yellow_center)
-        
-        # Clean up the mask
-        kernel = np.ones((3,3), np.uint8)
-        # Remove noise
-        combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_OPEN, kernel, iterations=1)
-        # Fill holes
-        combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_CLOSE, kernel, iterations=3)
-        
-        # Find the largest connected component
-        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(combined_mask)
-        
-        if num_labels > 1:
-            # Find the largest component (excluding background)
-            max_area = 0
-            max_label = 1
-            for i in range(1, num_labels):
-                area = stats[i, cv2.CC_STAT_AREA]
-                if area > max_area:
-                    max_area = area
-                    max_label = i
-            
-            # Extract the largest component
-            final_mask = np.zeros_like(combined_mask)
-            final_mask[labels == max_label] = 255
-        else:
-            final_mask = combined_mask
-        
-        return final_mask
-    
-    def _detect_and_fix_mask_inversion(self, mask, original_image):
-        """
-        Detect if the mask is inverted (flower is black, background is white) and fix it
-        
-        Args:
-            mask: Binary mask
-            original_image: Original RGB image
-            
-        Returns:
-            Fixed mask with flower as white and background as black
-        """
-        # Calculate mask proportions
-        total_pixels = mask.shape[0] * mask.shape[1]
-        white_pixels = np.sum(mask > 127)
-        white_ratio = white_pixels / total_pixels
-        
-        # Get the center region of the mask (where the flower is likely to be)
-        h, w = mask.shape[:2]
-        center_x, center_y = w // 2, h // 2
-        center_size = min(w, h) // 4
-        
-        # Extract center region
-        center_region = mask[
-            center_y - center_size:center_y + center_size,
-            center_x - center_size:center_x + center_size
-        ]
-        
-        # Calculate the average value in the center region
-        center_mean = np.mean(center_region)
-        
-        # Extract border region
-        border_thickness = min(w, h) // 8
-        border_mask = np.ones_like(mask, dtype=np.uint8) * 255
-        border_mask[border_thickness:-border_thickness, border_thickness:-border_thickness] = 0
-        border_region = cv2.bitwise_and(mask, border_mask)
-        border_mean = np.mean(border_region[border_region > 0]) if np.sum(border_region > 0) > 0 else 0
-        
-        # Determine if the mask needs to be inverted
-        needs_inversion = False
-        
-        # Case 1: Center is darker than the border (flower should be white but is black)
-        if center_mean < border_mean and white_ratio > 0.6:
-            needs_inversion = True
-        
-        # Case 2: The mask has too much white area and the center is dark
-        if white_ratio > 0.7 and center_mean < 127:
-            needs_inversion = True
-        
-        # Case 3: For purple flowers, check if the purple areas align with black areas in the mask
-        if hasattr(self, '_is_purple_flower_case') and self._is_purple_flower_case:
-            # For purple flowers, we can also check if the purple color aligns with the black areas
-            hsv_image = cv2.cvtColor(original_image, cv2.COLOR_BGR2HSV)
-            purple_check_mask = cv2.inRange(hsv_image, np.array([125, 40, 30]), np.array([165, 255, 255]))
-            
-            # Sample some points in both masks to see if purple areas match black areas
-            sample_step = 20
-            purple_on_black_count = 0
-            purple_on_white_count = 0
-            
-            for y in range(0, h, sample_step):
-                for x in range(0, w, sample_step):
-                    if purple_check_mask[y, x] > 0:
-                        if mask[y, x] < 127:
-                            purple_on_black_count += 1
-                        else:
-                            purple_on_white_count += 1
-            
-            # If most purple areas are on black, we need to invert
-            if purple_on_black_count > purple_on_white_count:
-                needs_inversion = True
-        
-        # Invert the mask if needed
-        if needs_inversion:
-            print("Inverting mask for better segmentation...")
-            return cv2.bitwise_not(mask)
-        else:
-            return mask
+        self.min_flower_size_ratio = 0.05  # Minimum flower size ratio
     
     def process(self, image):
         """
@@ -372,96 +54,64 @@ class FlowerSegmentationPipeline:
         original_image = image.copy()
         intermediate_results["1_original"] = original_image
         
-        # Check for special cases
-        has_bokeh = self._detect_bokeh_background(original_image)
-        is_purple_flower = self._detect_purple_flower_green_background(original_image)
-        self._is_purple_flower_case = is_purple_flower  # Store for use in mask inversion detection
+        # Step 2: Convert to LAB color space
+        lab_image = convert_to_lab(original_image)
+        l, a, b = extract_lab_channels(lab_image)
         
-        if has_bokeh:
-            # Use special processing for bokeh backgrounds
-            print("Detected bokeh background, using focus-based processing...")
-            bokeh_mask = self._process_bokeh_flower(original_image)
-            
-            # Save intermediate mask
-            intermediate_results["special_bokeh_mask"] = bokeh_mask
-            
-            # Use this mask as the watershed mask
-            watershed_mask = bokeh_mask
-            
-        elif is_purple_flower:
-            # Use special processing for purple flowers
-            print("Detected purple flower with green background, using special HSV processing...")
-            purple_mask = self._process_purple_flower(original_image)
-            
-            # Save intermediate mask
-            intermediate_results["special_purple_mask"] = purple_mask
-            
-            # Use this mask as the watershed mask
-            watershed_mask = purple_mask
-            
-        else:
-            # Normal processing pipeline
-            # Step 2: Convert to LAB color space
-            lab_image = convert_to_lab(original_image)
-            l, a, b = extract_lab_channels(lab_image)
-            
-            # Save LAB channels
-            intermediate_results["2a_lab_l_channel"] = l
-            intermediate_results["2b_lab_a_channel"] = a
-            intermediate_results["2c_lab_b_channel"] = b
-            
-            # Step 3: Enhance contrast using histogram equalization
-            enhanced_l = cv2.equalizeHist(l)
-            intermediate_results["3a_enhanced_l"] = enhanced_l
-            
-            # Calculate gradient information
-            grad_l = self._calculate_gradient(l)
-            grad_a = self._calculate_gradient(a)
-            grad_b = self._calculate_gradient(b)
-            
-            # Combine gradient information
-            combined_gradient = cv2.addWeighted(grad_l, 0.5, cv2.addWeighted(grad_a, 0.5, grad_b, 0.5, 0), 0.5, 0)
-            intermediate_results["3b_combined_gradient"] = combined_gradient
-            
-            # Step 4: Apply filters for noise reduction
-            gaussian_filtered = apply_gaussian_filter(enhanced_l, self.gaussian_kernel)
-            intermediate_results["4a_gaussian_filtered"] = gaussian_filtered
-            
-            bilateral_filtered = apply_bilateral_filter(
-                gaussian_filtered, 
-                d=self.bilateral_d, 
-                sigma_color=self.bilateral_sigma, 
-                sigma_space=self.bilateral_sigma
-            )
-            intermediate_results["4b_bilateral_filtered"] = bilateral_filtered
-            
-            # Step 5: Multi-level thresholding
-            adaptive_thresh = adaptive_threshold(
-                bilateral_filtered, 
-                block_size=self.adaptive_block_size, 
-                c=self.adaptive_c
-            )
-            intermediate_results["5a_adaptive_threshold"] = adaptive_thresh
-            
-            otsu_thresh = otsu_threshold(bilateral_filtered)
-            intermediate_results["5b_otsu_threshold"] = otsu_thresh
-            
-            multi_thresh = multi_level_threshold(bilateral_filtered, num_classes=3)
-            multi_thresh_binary = cv2.threshold(multi_thresh, 127, 255, cv2.THRESH_BINARY)[1]
-            intermediate_results["5c_multi_threshold"] = multi_thresh_binary
-            
-            # Combine threshold results
-            combined_thresh = cv2.bitwise_or(
-                adaptive_thresh, 
-                cv2.bitwise_or(otsu_thresh, multi_thresh_binary)
-            )
-            intermediate_results["5d_combined_threshold"] = combined_thresh
-            
-            # Step 6: Apply watershed segmentation
-            watershed_mask = self._apply_watershed_segmentation(original_image, combined_thresh)
+        # Save LAB channels
+        intermediate_results["2a_lab_l_channel"] = l
+        intermediate_results["2b_lab_a_channel"] = a
+        intermediate_results["2c_lab_b_channel"] = b
         
-        # Check and fix mask inversion if needed
-        watershed_mask = self._detect_and_fix_mask_inversion(watershed_mask, original_image)
+        # Step 3: Enhance contrast using histogram equalization
+        enhanced_l = cv2.equalizeHist(l)
+        intermediate_results["3a_enhanced_l"] = enhanced_l
+        
+        # Calculate gradient information
+        grad_l = self._calculate_gradient(l)
+        grad_a = self._calculate_gradient(a)
+        grad_b = self._calculate_gradient(b)
+        
+        # Combine gradient information
+        combined_gradient = cv2.addWeighted(grad_l, 0.5, cv2.addWeighted(grad_a, 0.5, grad_b, 0.5, 0), 0.5, 0)
+        intermediate_results["3b_combined_gradient"] = combined_gradient
+        
+        # Step 4: Apply filters for noise reduction
+        gaussian_filtered = apply_gaussian_filter(enhanced_l, self.gaussian_kernel)
+        intermediate_results["4a_gaussian_filtered"] = gaussian_filtered
+        
+        bilateral_filtered = apply_bilateral_filter(
+            gaussian_filtered, 
+            d=self.bilateral_d, 
+            sigma_color=self.bilateral_sigma, 
+            sigma_space=self.bilateral_sigma
+        )
+        intermediate_results["4b_bilateral_filtered"] = bilateral_filtered
+        
+        # Step 5: Multi-level thresholding
+        adaptive_thresh = adaptive_threshold(
+            bilateral_filtered, 
+            block_size=self.adaptive_block_size, 
+            c=self.adaptive_c
+        )
+        intermediate_results["5a_adaptive_threshold"] = adaptive_thresh
+        
+        otsu_thresh = otsu_threshold(bilateral_filtered)
+        intermediate_results["5b_otsu_threshold"] = otsu_thresh
+        
+        multi_thresh = multi_level_threshold(bilateral_filtered, num_classes=3)
+        multi_thresh_binary = cv2.threshold(multi_thresh, 127, 255, cv2.THRESH_BINARY)[1]
+        intermediate_results["5c_multi_threshold"] = multi_thresh_binary
+        
+        # Combine threshold results
+        combined_thresh = cv2.bitwise_or(
+            adaptive_thresh, 
+            cv2.bitwise_or(otsu_thresh, multi_thresh_binary)
+        )
+        intermediate_results["5d_combined_threshold"] = combined_thresh
+        
+        # Step 6: Apply watershed segmentation
+        watershed_mask = self._apply_watershed_segmentation(original_image, combined_thresh)
         intermediate_results["6a_watershed_segmentation"] = watershed_mask
         
         # Fill holes
