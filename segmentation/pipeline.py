@@ -34,7 +34,7 @@ class FlowerSegmentationPipeline:
         self.feather_amount = 12  # Amount of feathering to apply
         
         # Watershed parameters
-        self.min_flower_size_ratio = 0.05  # Minimum flower size ratio
+        self.min_flower_size_ratio = 0.35  # Minimum flower size ratio
     
     def process(self, image):
         """
