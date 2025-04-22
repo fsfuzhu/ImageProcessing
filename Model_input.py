@@ -106,8 +106,8 @@ def compare_images(segmented_path, ground_truth_path, model):
 # Main evaluation function
 model = load_vit_model()
 
-segmented_folder = "Dataset_1\input_images\hard"
-ground_truth_folder = "Dataset_1\ground_truths\hard"
+segmented_folder = "output"
+ground_truth_folder = "Dataset_2\ground_truths"
 
 results = []
 threshold = 0.9  # Adjust this threshold based on accuracy requirements
