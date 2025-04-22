@@ -117,11 +117,17 @@ def main():
                         help='Evaluate segmentation results against ground truth')
     parser.add_argument('--evaluate-output', type=str, default='evaluation_output',
                         help='Directory to save evaluation results')
+    parser.add_argument('--using-difficulty', action='store_true',
+                        help='Use/skip difficulty levels for dataset1/dataset2')
     
     args = parser.parse_args()
     
     # Define difficulty levels
-    difficulty_levels = ['easy', 'medium', 'hard']
+    if args.using_difficulty:
+        difficulty_levels = ['easy', 'medium', 'hard']
+    else:
+        # If not using difficulty levels, process all images in the root directory
+        difficulty_levels = None
     
     # Process images
     process_images(args.input, args.output, args.pipeline, difficulty_levels)
